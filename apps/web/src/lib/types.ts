@@ -79,3 +79,79 @@ export interface ActiveSession {
   expiresAt: string;
   current: boolean;
 }
+
+export type PayType = 'HOURLY' | 'DAILY' | 'MONTHLY';
+export type PayrollFrequency = 'WEEKLY' | 'SEMI_MONTHLY' | 'MONTHLY';
+export type DailyPayMode = 'FULL' | 'PROPORTIONAL';
+export type AbsenceMethod = 'ACTUAL_MONTH_DAYS' | 'FIXED_DAYS' | 'SCHEDULED_WORK_DAYS';
+
+export interface Department {
+  id: string;
+  name: string;
+  isActive: boolean;
+  activeEmployees: number;
+}
+
+export interface Employee {
+  id: string;
+  code: string;
+  fullName: string;
+  phone: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  terminationDate: string | null;
+  department: { id: string; name: string };
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  payVisible: boolean;
+  currentPay: { payType: PayType; amount: string; effectiveFrom: string } | null;
+}
+
+export interface PayRateRow {
+  id: string;
+  payType: PayType;
+  amount: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface PayPolicyRow {
+  id: string;
+  payrollFrequency: PayrollFrequency;
+  dailyPayMode: DailyPayMode | null;
+  referenceDailyHours: number | null;
+  absenceDeductionMethod: AbsenceMethod | null;
+  fixedMonthDays: number | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface PayHistory {
+  rates: PayRateRow[];
+  policies: PayPolicyRow[];
+}
+
+export interface DepartmentHistoryRow {
+  id: string;
+  department: { id: string; name: string };
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdBy: string;
+}
+
+export interface EmployeeChange {
+  id: string;
+  action: string;
+  actorUsername: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface SearchResults {
+  employees: { id: string; code: string; fullName: string; status: 'ACTIVE' | 'INACTIVE'; department: { name: string } }[];
+}

@@ -9,6 +9,8 @@ import { getConfig } from './common/config/env';
 import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { DepartmentsModule } from './departments/departments.module';
+import { EmployeesModule } from './employees/employees.module';
 import { HealthController } from './health/health.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -29,6 +31,8 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     SettingsModule,
     DashboardModule,
+    DepartmentsModule,
+    EmployeesModule,
   ],
   controllers: [HealthController],
   providers: [

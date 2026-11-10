@@ -3,6 +3,7 @@
 import {
   BarChart3,
   Bell,
+  Building2,
   CalendarClock,
   ChevronsLeft,
   ChevronsRight,
@@ -25,7 +26,7 @@ import { Badge, cn, Modal } from '@abu-qamar/ui';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { type NavIcon, type NavItem, visibleNavItems } from '@/lib/nav';
-import type { NotificationItem, Paginated, SessionUser } from '@/lib/types';
+import type { NotificationItem, Paginated, SearchResults, SessionUser } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { BrandMark } from './auth-card';
 import { ThemeToggle } from './theme-toggle';
@@ -33,6 +34,7 @@ import { ThemeToggle } from './theme-toggle';
 const ICONS: Record<NavIcon, LucideIcon> = {
   dashboard: LayoutDashboard,
   employees: Users,
+  departments: Building2,
   attendance: CalendarClock,
   payroll: Wallet,
   reports: BarChart3,
@@ -147,6 +149,27 @@ function GlobalSearch({ items }: { items: NavItem[] }) {
     return q ? items.filter((i) => i.label.includes(q)) : [];
   }, [items, query]);
 
+  // الموظفون المطابقون (الخادم يعيد فقط ما يملك المستخدم صلاحية رؤيته) — بتأخير قصير بعد التوقف عن الكتابة
+  const [employees, setEmployees] = useState<SearchResults['employees']>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setEmployees([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api
+        .get<SearchResults>(`/search?q=${encodeURIComponent(q)}`)
+        .then((r) => !cancelled && setEmployees(r.employees))
+        .catch(() => !cancelled && setEmployees([]));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
   const go = (href: string) => {
     setQuery('');
     setOpen(false);
@@ -159,10 +182,10 @@ function GlobalSearch({ items }: { items: NavItem[] }) {
       <input
         type="search"
         role="combobox"
-        aria-expanded={open && results.length > 0}
+        aria-expanded={open && results.length + employees.length > 0}
         aria-controls="global-search-results"
         aria-label="بحث"
-        placeholder="بحث في النظام…"
+        placeholder="بحث عن موظف أو صفحة…"
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -170,7 +193,9 @@ function GlobalSearch({ items }: { items: NavItem[] }) {
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && results[0]) go(results[0].href);
+          if (e.key !== 'Enter') return;
+          if (results[0]) go(results[0].href);
+          else if (employees[0]) go(`/employees/${employees[0].id}`);
         }}
         className="h-10 w-full rounded-lg border border-line bg-bg ps-9 pe-3 text-sm text-ink placeholder:text-muted focus:border-brand-500 focus:outline-2 focus:outline-brand-500/30"
       />
@@ -180,8 +205,26 @@ function GlobalSearch({ items }: { items: NavItem[] }) {
           role="listbox"
           className="absolute inset-x-0 top-12 z-30 overflow-hidden rounded-lg border border-line bg-surface shadow-lg"
         >
+          {employees.map((employee) => (
+            <li key={employee.id} role="option" aria-selected={false}>
+              <button
+                type="button"
+                onClick={() => go(`/employees/${employee.id}`)}
+                className="flex w-full items-center gap-3 px-3 py-2.5 text-start text-sm hover:bg-subtle"
+              >
+                <Users className="size-4 shrink-0 text-muted" />
+                <span className="min-w-0 flex-1 truncate">
+                  {employee.fullName}
+                  <span className="ms-2 text-xs text-muted">
+                    <span dir="ltr">{employee.code}</span> · {employee.department.name}
+                    {employee.status === 'INACTIVE' && ' · متوقف'}
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
           {results.length === 0 ? (
-            <li className="px-3 py-3 text-sm text-muted">لا توجد نتائج</li>
+            employees.length === 0 && <li className="px-3 py-3 text-sm text-muted">لا توجد نتائج</li>
           ) : (
             results.map((item) => {
               const Icon = ICONS[item.icon];

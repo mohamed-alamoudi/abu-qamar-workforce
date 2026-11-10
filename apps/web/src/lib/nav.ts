@@ -1,6 +1,6 @@
 import { type AccessSubject, canAny, type PermissionKey } from '@abu-qamar/shared';
 
-export type NavIcon = 'dashboard' | 'employees' | 'attendance' | 'payroll' | 'reports' | 'users' | 'audit' | 'settings';
+export type NavIcon = 'dashboard' | 'employees' | 'departments' | 'attendance' | 'payroll' | 'reports' | 'users' | 'audit' | 'settings';
 
 export interface NavItem {
   href: string;
@@ -27,8 +27,8 @@ export const NAV_ITEMS: NavItem[] = [
     icon: 'employees',
     anyOf: ['employees.view', 'employees.create', 'employees.update'],
     primary: true,
-    plannedPhase: 2,
   },
+  { href: '/departments', label: 'الأقسام', icon: 'departments', anyOf: ['employees.view'] },
   {
     href: '/attendance',
     label: 'الحضور والانصراف',

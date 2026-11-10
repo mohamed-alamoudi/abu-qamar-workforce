@@ -70,6 +70,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return { statusCode: 404, code: ERROR_CODES.NOT_FOUND, message: 'السجل غير موجود' };
     }
 
+    // قيود EXCLUDE (منع التداخل) و triggers الحماية في قاعدة البيانات: الضمانة الأخيرة إن فات الفحص في الكود
+    const raw = exception instanceof Error ? exception.message : '';
+    if (raw.includes('23P01') || raw.includes('exclusion constraint')) {
+      return { statusCode: 409, code: ERROR_CODES.CONFLICT, message: 'تتداخل هذه الفترة مع فترة مسجلة مسبقًا' };
+    }
+    if (raw.includes('23001')) {
+      return { statusCode: 409, code: ERROR_CODES.CONFLICT, message: 'هذا السجل محمي ولا يمكن تعديله أو حذفه' };
+    }
+
     const err = exception instanceof Error ? exception : new Error(String(exception));
     this.logger.error(`${req.method} ${req.path} → ${err.name}: ${err.message}`, err.stack);
     return { statusCode: HttpStatus.INTERNAL_SERVER_ERROR, code: ERROR_CODES.INTERNAL_ERROR, message: 'حدث خطأ غير متوقع' };

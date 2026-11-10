@@ -55,7 +55,7 @@ describe('قائمة التنقل حسب الصلاحيات', () => {
 
   it('الأدمن يرى كل شيء', () => {
     expect(ids('ADMIN', [])).toEqual(
-      expect.arrayContaining(['/dashboard', '/employees', '/attendance', '/payroll', '/reports', '/users', '/audit', '/settings']),
+      expect.arrayContaining(['/dashboard', '/employees', '/departments', '/attendance', '/payroll', '/reports', '/users', '/audit', '/settings']),
     );
   });
 
