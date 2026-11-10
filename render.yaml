@@ -1,0 +1,54 @@
+# Render Blueprint — خادم NestJS + قاعدة PostgreSQL مُدارة.
+# (Render يقرأ هذا الملف من جذر المستودع. الشرح في docs/deployment.md و infra/render/README.md)
+#
+# بيئة Staging: أنشئ Blueprint ثانيًا من الملف نفسه باسم مختلف وقاعدة بيانات مستقلة،
+# ولا تنسخ بيانات الإنتاج إليها.
+services:
+  - type: web
+    name: abu-qamar-api
+    runtime: node
+    region: frankfurt
+    plan: starter
+    # --prod=false: أدوات البناء (nest, prisma, typescript) ضمن devDependencies
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm build:api
+    # تطبيق الـ migrations قبل الإقلاع (آمن لنسخة واحدة من الخادم؛ migrate deploy لا يعيد تطبيق ما طُبِّق)
+    startCommand: pnpm db:deploy && pnpm start:api
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: abu-qamar-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATA_ENCRYPTION_KEY
+        generateValue: true
+      # القيم التالية تُدخل يدويًا من لوحة Render (sync: false = لا تُحفظ في المستودع)
+      - key: APP_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: SETUP_TOKEN
+        sync: false
+      - key: SETUP_TOKEN_EXPIRES_AT
+        sync: false
+      # الطلبات تمر عبر: المتصفح → Vercel → موازن Render → الخادم
+      - key: TRUST_PROXY
+        value: "2"
+      - key: COOKIE_SAMESITE
+        value: lax
+      - key: ENABLE_API_DOCS
+        value: "false"
+
+databases:
+  - name: abu-qamar-db
+    databaseName: abu_qamar
+    user: abu_qamar
+    plan: basic-256mb
+    region: frankfurt
+    postgresMajorVersion: "16"

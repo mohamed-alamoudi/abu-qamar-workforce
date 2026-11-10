@@ -1,0 +1,1023 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// نظام إدارة موظفي سوبر ماركت أبو قمر — مخطط قاعدة البيانات
+//
+// • المعرفات UUID، المبالغ Decimal، الأوقات timestamptz (تُخزَّن UTC).
+// • القيود المتقدمة (منع التداخل EXCLUDE، قيود CHECK، الأدمن الوحيد، منع حذف
+//   السجلات المالية وسجل التدقيق) موجودة في migration مستقل بلغة SQL:
+//   prisma/migrations/*_advanced_constraints/migration.sql
+// • أسماء الجداول snake_case، وأسماء الأعمدة camelCase (افتراضي Prisma).
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═════════════════════════════ التعدادات ═════════════════════════════
+
+enum UserRole {
+  ADMIN
+  SUPERVISOR
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PayType {
+  HOURLY
+  DAILY
+  MONTHLY
+}
+
+enum DailyPayMode {
+  FULL
+  PROPORTIONAL
+}
+
+enum AbsenceDeductionMethod {
+  ACTUAL_MONTH_DAYS
+  FIXED_DAYS
+  SCHEDULED_WORK_DAYS
+}
+
+enum PayrollFrequency {
+  WEEKLY
+  SEMI_MONTHLY
+  MONTHLY
+}
+
+enum WorkSessionStatus {
+  OPEN
+  CLOSED
+  VOIDED
+}
+
+enum WorkSessionSource {
+  QUICK
+  MANUAL
+  OFFLINE_SYNC
+}
+
+enum AttendanceApprovalStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+}
+
+enum LeaveType {
+  PAID_LEAVE
+  UNPAID_LEAVE
+  PAID_EXCUSED_ABSENCE
+  UNPAID_ABSENCE
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum OvertimeStatus {
+  DETECTED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum PayrollPeriodStatus {
+  DRAFT
+  IN_REVIEW
+  READY_FOR_APPROVAL
+  CLOSED
+}
+
+enum PayrollComponentType {
+  REGULAR_WAGE
+  OVERTIME
+  BONUS
+  DEDUCTION
+  ABSENCE_DEDUCTION
+  ADJUSTMENT
+}
+
+enum AdjustmentType {
+  BONUS
+  DEDUCTION
+  WAGE_DIFFERENCE
+}
+
+enum AdjustmentStatus {
+  PENDING
+  APPROVED
+  APPLIED
+  CANCELLED
+}
+
+enum TransactionType {
+  SALARY_PAYMENT
+  ADVANCE_DISBURSEMENT
+  ADVANCE_REPAYMENT
+  DEBT_REPAYMENT
+  SETTLEMENT
+  REFUND
+  REVERSAL
+}
+
+enum TransactionStatus {
+  POSTED
+  REVERSED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  E_WALLET
+}
+
+enum AccountStatus {
+  OPEN
+  SETTLED
+  CANCELLED
+}
+
+enum DebtMovementType {
+  INITIAL
+  INCREASE
+  REPAYMENT
+  SETTLEMENT
+  REVERSAL
+}
+
+enum SettlementTargetType {
+  PAYROLL_ENTRY
+  ADVANCE
+  DEBT
+  ADJUSTMENT
+}
+
+enum SyncStatus {
+  RECEIVED
+  APPLIED
+  DUPLICATE
+  CONFLICT
+  REJECTED
+}
+
+enum NotificationType {
+  MISSING_CHECKOUT
+  ATTENDANCE_CONFLICT
+  OVERTIME_PENDING
+  LEAVE_PENDING
+  PAYROLL_READY_FOR_REVIEW
+  SYNC_FAILED
+  BACKUP_FAILED
+  UNUSUAL_LOGIN
+}
+
+enum BackupType {
+  DAILY
+  WEEKLY
+  MANUAL
+  PRE_RESTORE
+}
+
+enum BackupStatus {
+  IN_PROGRESS
+  COMPLETED
+  VERIFIED
+  FAILED
+  EXPIRED
+}
+
+// ═════════════════════════ المستخدمون والأمان ═════════════════════════
+
+model User {
+  id                   String    @id @default(uuid()) @db.Uuid
+  /// يُخزَّن بأحرف صغيرة دائمًا
+  username             String    @unique @db.VarChar(32)
+  fullName             String    @db.VarChar(100)
+  /// Argon2id
+  passwordHash         String
+  role                 UserRole  @default(SUPERVISOR)
+  isActive             Boolean   @default(true)
+  disabledAt           DateTime? @db.Timestamptz(3)
+  /// سر TOTP مشفّر (AES-256-GCM)
+  totpSecretEnc        String?
+  totpPendingSecretEnc String?
+  totpEnabledAt        DateTime? @db.Timestamptz(3)
+  passwordChangedAt    DateTime  @default(now()) @db.Timestamptz(3)
+  lastLoginAt          DateTime? @db.Timestamptz(3)
+  createdById          String?   @db.Uuid
+  createdAt            DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @db.Timestamptz(3)
+
+  createdBy     User?  @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdUsers  User[] @relation("UserCreatedBy")
+
+  sessions           Session[]
+  recoveryCodes      UserRecoveryCode[]
+  permissions        UserPermission[]   @relation("UserPermissionOwner")
+  grantedPermissions UserPermission[]   @relation("UserPermissionGranter")
+  loginAttempts      LoginAttempt[]
+  auditLogs          AuditLog[]
+  notifications      Notification[]
+  syncOperations     SyncOperation[]
+
+  employeesCreated         Employee[]                  @relation("EmployeeCreatedBy")
+  departmentHistoryCreated EmployeeDepartmentHistory[] @relation("DeptHistoryCreatedBy")
+  payRatesCreated          PayRate[]                   @relation("PayRateCreatedBy")
+  payPoliciesCreated       EmployeePayPolicy[]         @relation("PayPolicyCreatedBy")
+  schedulesCreated         EmployeeSchedule[]          @relation("ScheduleCreatedBy")
+  workSessionsCreated      WorkSession[]               @relation("WorkSessionCreatedBy")
+  workSessionsUpdated      WorkSession[]               @relation("WorkSessionUpdatedBy")
+  workBreaksCreated        WorkBreak[]                 @relation("WorkBreakCreatedBy")
+  attendanceCorrections    AttendanceCorrection[]      @relation("CorrectionBy")
+  attendanceApprovals      AttendanceApproval[]        @relation("AttendanceApprovalActor")
+  leavesRecorded           LeaveRecord[]               @relation("LeaveRecordedBy")
+  leavesDecided            LeaveRecord[]               @relation("LeaveDecidedBy")
+  overtimePoliciesCreated  OvertimePolicy[]            @relation("OvertimePolicyCreatedBy")
+  overtimeDecided          OvertimeEntry[]             @relation("OvertimeDecidedBy")
+  payrollPeriodsCreated    PayrollPeriod[]             @relation("PayrollPeriodCreatedBy")
+  payrollPeriodsApproved   PayrollPeriod[]             @relation("PayrollPeriodApprovedBy")
+  payrollPeriodsClosed     PayrollPeriod[]             @relation("PayrollPeriodClosedBy")
+  adjustmentsCreated       PayrollAdjustment[]         @relation("AdjustmentCreatedBy")
+  adjustmentsApproved      PayrollAdjustment[]         @relation("AdjustmentApprovedBy")
+  transactionsCreated      FinancialTransaction[]      @relation("TransactionCreatedBy")
+  transactionsPaid         FinancialTransaction[]      @relation("TransactionPaidBy")
+  advancesCreated          AdvanceAccount[]            @relation("AdvanceCreatedBy")
+  debtsCreated             DebtAccount[]               @relation("DebtCreatedBy")
+  debtMovementsCreated     DebtMovement[]              @relation("DebtMovementCreatedBy")
+  settingsUpdated          SystemSetting[]             @relation("SettingUpdatedBy")
+  backupsTriggered         BackupRecord[]              @relation("BackupTriggeredBy")
+
+  @@index([role, isActive])
+  @@map("users")
+}
+
+model Permission {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique @db.VarChar(64)
+  nameAr    String   @db.VarChar(150)
+  category  String   @db.VarChar(32)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  users UserPermission[]
+
+  @@map("permissions")
+}
+
+model UserPermission {
+  userId       String   @db.Uuid
+  permissionId String   @db.Uuid
+  grantedById  String   @db.Uuid
+  grantedAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  user       User       @relation("UserPermissionOwner", fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  grantedBy  User       @relation("UserPermissionGranter", fields: [grantedById], references: [id], onDelete: Restrict)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+  @@map("user_permissions")
+}
+
+model Session {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  /// SHA-256 لرمز الجلسة — الرمز نفسه لا يُخزَّن أبدًا
+  tokenHash      String    @unique @db.Char(64)
+  rememberDevice Boolean   @default(false)
+  ip             String?   @db.VarChar(64)
+  userAgent      String?   @db.VarChar(512)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  lastSeenAt     DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt      DateTime  @db.Timestamptz(3)
+  /// آخر مرة أعاد فيها المستخدم إدخال كلمة المرور (للعمليات الحساسة)
+  reauthAt       DateTime? @db.Timestamptz(3)
+  revokedAt      DateTime? @db.Timestamptz(3)
+  revokedReason  String?   @db.VarChar(64)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model UserRecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  codeHash  String    @db.Char(64)
+  usedAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
+  @@map("user_recovery_codes")
+}
+
+model LoginAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  username  String   @db.VarChar(64)
+  userId    String?  @db.Uuid
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @db.VarChar(512)
+  success   Boolean
+  /// INVALID_CREDENTIALS | ACCOUNT_DISABLED | INVALID_TOTP | LOCKED | REAUTH_FAILED | OK
+  reason    String   @db.VarChar(32)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([username, createdAt])
+  @@index([ip, createdAt])
+  @@index([userId, createdAt])
+  @@map("login_attempts")
+}
+
+/// سجل تدقيق للإضافة فقط: يمنع trigger في قاعدة البيانات أي UPDATE أو DELETE عليه.
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  actorId       String?  @db.Uuid
+  /// نسخة نصية تبقى مقروءة حتى لو تغيّر اسم المستخدم
+  actorUsername String?  @db.VarChar(64)
+  action        String   @db.VarChar(64)
+  entityType    String?  @db.VarChar(64)
+  entityId      String?  @db.VarChar(64)
+  before        Json?
+  after         Json?
+  metadata      Json?
+  ip            String?  @db.VarChar(64)
+  userAgent     String?  @db.VarChar(512)
+  sessionId     String?  @db.Uuid
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+// ═════════════════════════════ الموظفون ═════════════════════════════
+
+model Department {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(100)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  employees      Employee[]
+  history        EmployeeDepartmentHistory[]
+  workSessions   WorkSession[]
+  scheduleShifts ScheduleShift[]
+
+  @@map("departments")
+}
+
+model Employee {
+  id              String         @id @default(uuid()) @db.Uuid
+  /// كود تلقائي فريد من تسلسل قاعدة البيانات: EMP-0001
+  code            String         @unique @default(dbgenerated("('EMP-' || lpad(nextval('employee_code_seq')::text, 4, '0'))")) @db.VarChar(16)
+  fullName        String         @db.VarChar(150)
+  phone           String?        @db.VarChar(32)
+  departmentId    String         @db.Uuid
+  status          EmployeeStatus @default(ACTIVE)
+  /// تاريخ إنهاء العمل عند الإيقاف
+  terminationDate DateTime?      @db.Date
+  /// رقم إصدار للتحكم بالتعارض (optimistic locking)
+  version         Int            @default(1)
+  createdById     String         @db.Uuid
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  createdBy  User       @relation("EmployeeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  departmentHistory EmployeeDepartmentHistory[]
+  payRates          PayRate[]
+  payPolicies       EmployeePayPolicy[]
+  schedules         EmployeeSchedule[]
+  scheduleShifts    ScheduleShift[]
+  workSessions      WorkSession[]
+  leaveRecords      LeaveRecord[]
+  overtimePolicies  OvertimePolicy[]
+  overtimeEntries   OvertimeEntry[]
+  payrollEntries    PayrollEntry[]
+  adjustments       PayrollAdjustment[]
+  transactions      FinancialTransaction[]
+  advanceAccounts   AdvanceAccount[]
+  debtAccounts      DebtAccount[]
+
+  @@index([status])
+  @@index([departmentId, status])
+  @@index([fullName])
+  @@map("employees")
+}
+
+/// تاريخ انتقال الموظف بين الأقسام (لا تتداخل الفترات — قيد EXCLUDE).
+model EmployeeDepartmentHistory {
+  id            String    @id @default(uuid()) @db.Uuid
+  employeeId    String    @db.Uuid
+  departmentId  String    @db.Uuid
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdById   String    @db.Uuid
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  employee   Employee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  createdBy  User       @relation("DeptHistoryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, effectiveFrom])
+  @@map("employee_department_history")
+}
+
+/// تاريخ الأجور (لا تتداخل الفترات للموظف نفسه — قيد EXCLUDE).
+model PayRate {
+  id            String    @id @default(uuid()) @db.Uuid
+  employeeId    String    @db.Uuid
+  payType       PayType
+  amount        Decimal   @db.Decimal(12, 2)
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdById   String    @db.Uuid
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdBy User     @relation("PayRateCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, effectiveFrom])
+  @@map("pay_rates")
+}
+
+/// سياسات احتساب الأجر للموظف بتاريخ سريان (لا تتداخل — قيد EXCLUDE).
+model EmployeePayPolicy {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  employeeId             String                  @db.Uuid
+  payrollFrequency       PayrollFrequency        @default(MONTHLY)
+  /// للأجر اليومي: كامل أو نسبي
+  dailyPayMode           DailyPayMode?
+  /// ساعات اليوم المرجعية — لا تُفترض 8 ساعات تلقائيًا
+  referenceDailyHours    Decimal?                @db.Decimal(4, 2)
+  /// للأجر الشهري: طريقة خصم الغياب غير المدفوع
+  absenceDeductionMethod AbsenceDeductionMethod?
+  /// عدد الأيام الثابت عند اختيار FIXED_DAYS
+  fixedMonthDays         Int?
+  effectiveFrom          DateTime                @db.Date
+  effectiveTo            DateTime?               @db.Date
+  createdById            String                  @db.Uuid
+  createdAt              DateTime                @default(now()) @db.Timestamptz(3)
+
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdBy User     @relation("PayPolicyCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, effectiveFrom])
+  @@map("employee_pay_policies")
+}
+
+/// جدول عمل اختياري. الموظف المرن (isFlexible) لا يُحسب عليه تأخير ولا غياب تلقائي.
+model EmployeeSchedule {
+  id            String    @id @default(uuid()) @db.Uuid
+  employeeId    String    @db.Uuid
+  name          String?   @db.VarChar(100)
+  isFlexible    Boolean   @default(false)
+  /// نمط أسبوعي ثابت: [{ "day": 6, "start": "08:00", "end": "16:00" }, ...] بالتوقيت المحلي
+  weeklyPattern Json?
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdById   String    @db.Uuid
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  employee  Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdBy User            @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  shifts    ScheduleShift[]
+
+  @@index([employeeId, effectiveFrom])
+  @@map("employee_schedules")
+}
+
+/// ورديات مجدولة بتاريخ محدد (للجداول المتغيرة، أو للعمل في قسم آخر خلال وردية).
+model ScheduleShift {
+  id           String   @id @default(uuid()) @db.Uuid
+  scheduleId   String?  @db.Uuid
+  employeeId   String   @db.Uuid
+  departmentId String?  @db.Uuid
+  startAt      DateTime @db.Timestamptz(3)
+  endAt        DateTime @db.Timestamptz(3)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  schedule   EmployeeSchedule? @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  employee   Employee          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  department Department?       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, startAt])
+  @@map("schedule_shifts")
+}
+
+// ═════════════════════════════ الدوام ═════════════════════════════
+
+/// وردية عمل. لا تتداخل ورديات الموظف نفسه (قيد EXCLUDE يستثني الملغاة).
+model WorkSession {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  employeeId         String                   @db.Uuid
+  /// القسم الذي عمل فيه خلال هذه الوردية (قد يختلف عن قسمه الحالي)
+  departmentId       String                   @db.Uuid
+  /// التاريخ المحلي لبداية الوردية (Asia/Gaza) — الوردية الليلية تتبع يوم بدايتها
+  workDate           DateTime                 @db.Date
+  checkInAt          DateTime                 @db.Timestamptz(3)
+  checkOutAt         DateTime?                @db.Timestamptz(3)
+  /// الأوقات الأصلية تُحفظ دائمًا ولا تتغير بالتصحيح
+  originalCheckInAt  DateTime                 @db.Timestamptz(3)
+  originalCheckOutAt DateTime?                @db.Timestamptz(3)
+  status             WorkSessionStatus        @default(OPEN)
+  approvalStatus     AttendanceApprovalStatus @default(DRAFT)
+  /// الدقائق المستحقة (الفعلية − الاستراحات غير المدفوعة)، تُحسب عند الإغلاق دون تقريب
+  workedMinutes      Int?
+  source             WorkSessionSource        @default(QUICK)
+  version            Int                      @default(1)
+  /// معرف العملية القادم من الجهاز (منع التكرار عند المزامنة)
+  clientOperationId  String?                  @unique @db.VarChar(64)
+  voidedAt           DateTime?                @db.Timestamptz(3)
+  voidReason         String?                  @db.VarChar(255)
+  createdById        String                   @db.Uuid
+  updatedById        String?                  @db.Uuid
+  createdAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime                 @updatedAt @db.Timestamptz(3)
+
+  employee   Employee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  createdBy  User       @relation("WorkSessionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy  User?      @relation("WorkSessionUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  breaks          WorkBreak[]
+  corrections     AttendanceCorrection[]
+  approvals       AttendanceApproval[]
+  overtimeEntries OvertimeEntry[]
+
+  @@index([employeeId, workDate])
+  @@index([workDate, status])
+  @@index([status, approvalStatus])
+  @@index([checkInAt])
+  @@map("work_sessions")
+}
+
+model WorkBreak {
+  id          String    @id @default(uuid()) @db.Uuid
+  sessionId   String    @db.Uuid
+  startAt     DateTime  @db.Timestamptz(3)
+  endAt       DateTime? @db.Timestamptz(3)
+  /// الاستراحة غير المدفوعة تُستبعد من الساعات المستحقة
+  isPaid      Boolean   @default(false)
+  createdById String    @db.Uuid
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  session   WorkSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  createdBy User        @relation("WorkBreakCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([sessionId])
+  @@map("work_breaks")
+}
+
+/// سجل تصحيحات الدوام: القيمة القديمة والجديدة ومن عدّل ومتى.
+model AttendanceCorrection {
+  id            String   @id @default(uuid()) @db.Uuid
+  sessionId     String   @db.Uuid
+  before        Json
+  after         Json
+  reason        String?  @db.VarChar(255)
+  correctedById String   @db.Uuid
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  session     WorkSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  correctedBy User        @relation("CorrectionBy", fields: [correctedById], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, createdAt])
+  @@map("attendance_corrections")
+}
+
+model AttendanceApproval {
+  id         String                   @id @default(uuid()) @db.Uuid
+  sessionId  String                   @db.Uuid
+  fromStatus AttendanceApprovalStatus
+  toStatus   AttendanceApprovalStatus
+  note       String?                  @db.VarChar(255)
+  actorId    String                   @db.Uuid
+  createdAt  DateTime                 @default(now()) @db.Timestamptz(3)
+
+  session WorkSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  actor   User        @relation("AttendanceApprovalActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, createdAt])
+  @@map("attendance_approvals")
+}
+
+model LeaveRecord {
+  id           String      @id @default(uuid()) @db.Uuid
+  employeeId   String      @db.Uuid
+  type         LeaveType
+  startDate    DateTime    @db.Date
+  endDate      DateTime    @db.Date
+  reason       String?     @db.VarChar(255)
+  status       LeaveStatus @default(PENDING)
+  /// الأثر المالي: هل تُخصم أيام هذه الحالة من الأجر
+  affectsPay   Boolean
+  recordedById String      @db.Uuid
+  decidedById  String?     @db.Uuid
+  decidedAt    DateTime?   @db.Timestamptz(3)
+  createdAt    DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime    @updatedAt @db.Timestamptz(3)
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  recordedBy User     @relation("LeaveRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+  decidedBy  User?    @relation("LeaveDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, startDate])
+  @@index([status])
+  @@map("leave_records")
+}
+
+/// سياسة العمل الإضافي بتاريخ سريان. employeeId = NULL تعني السياسة العامة الافتراضية.
+model OvertimePolicy {
+  id                     String    @id @default(uuid()) @db.Uuid
+  employeeId             String?   @db.Uuid
+  multiplier             Decimal   @default(1.5) @db.Decimal(5, 3)
+  /// سعر إضافي خاص للساعة (يتجاوز المعامل عند تحديده)
+  specialHourlyRate      Decimal?  @db.Decimal(12, 2)
+  dailyThresholdMinutes  Int?
+  weeklyThresholdMinutes Int?
+  effectiveFrom          DateTime  @db.Date
+  effectiveTo            DateTime? @db.Date
+  createdById            String    @db.Uuid
+  createdAt              DateTime  @default(now()) @db.Timestamptz(3)
+
+  employee  Employee? @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdBy User      @relation("OvertimePolicyCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, effectiveFrom])
+  @@map("overtime_policies")
+}
+
+/// ساعات إضافية مكتشفة — لا تدخل الراتب قبل اعتماد الأدمن.
+model OvertimeEntry {
+  id                String         @id @default(uuid()) @db.Uuid
+  employeeId        String         @db.Uuid
+  sessionId         String?        @db.Uuid
+  workDate          DateTime       @db.Date
+  minutes           Int
+  multiplier        Decimal        @db.Decimal(5, 3)
+  specialHourlyRate Decimal?       @db.Decimal(12, 2)
+  status            OvertimeStatus @default(DETECTED)
+  decidedById       String?        @db.Uuid
+  decidedAt         DateTime?      @db.Timestamptz(3)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
+
+  employee  Employee     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  session   WorkSession? @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  decidedBy User?        @relation("OvertimeDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, workDate])
+  @@index([status])
+  @@map("overtime_entries")
+}
+
+// ═════════════════════════════ المالية ═════════════════════════════
+
+model PayrollPeriod {
+  id           String              @id @default(uuid()) @db.Uuid
+  frequency    PayrollFrequency
+  startDate    DateTime            @db.Date
+  endDate      DateTime            @db.Date
+  label        String              @db.VarChar(100)
+  status       PayrollPeriodStatus @default(DRAFT)
+  createdById  String              @db.Uuid
+  approvedById String?             @db.Uuid
+  approvedAt   DateTime?           @db.Timestamptz(3)
+  closedById   String?             @db.Uuid
+  closedAt     DateTime?           @db.Timestamptz(3)
+  createdAt    DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime            @updatedAt @db.Timestamptz(3)
+
+  createdBy  User  @relation("PayrollPeriodCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy User? @relation("PayrollPeriodApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  closedBy   User? @relation("PayrollPeriodClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+
+  entries PayrollEntry[]
+
+  @@unique([frequency, startDate, endDate])
+  @@index([status])
+  @@index([startDate, endDate])
+  @@map("payroll_periods")
+}
+
+/// مستحق موظف ضمن فترة. لا تتداخل فترات الموظف نفسه (قيد EXCLUDE على periodStart/periodEnd).
+model PayrollEntry {
+  id               String   @id @default(uuid()) @db.Uuid
+  periodId         String   @db.Uuid
+  employeeId       String   @db.Uuid
+  /// نسخة من تاريخي الفترة لفرض منع التداخل على مستوى الموظف
+  periodStart      DateTime @db.Date
+  periodEnd        DateTime @db.Date
+  /// إجمالي الأجر المكتسب
+  grossAmount      Decimal  @default(0) @db.Decimal(12, 2)
+  deductionsAmount Decimal  @default(0) @db.Decimal(12, 2)
+  /// صافي الأجر المستحق
+  netAmount        Decimal  @default(0) @db.Decimal(12, 2)
+  /// المدفوع فعليًا من هذا المستحق (يبقى مرتبطًا بفترته عند الترحيل)
+  paidAmount       Decimal  @default(0) @db.Decimal(12, 2)
+  /// نسخة ثابتة من تفاصيل الحساب تُحفظ عند الإغلاق
+  snapshot         Json?
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+
+  period   PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  components          PayrollEntryComponent[]
+  transactions        FinancialTransaction[]
+  allocations         SettlementAllocation[]
+  adjustmentsTargeted PayrollAdjustment[]     @relation("AdjustmentTargetEntry")
+  adjustmentsApplied  PayrollAdjustment[]     @relation("AdjustmentAppliedEntry")
+
+  @@unique([periodId, employeeId])
+  @@index([employeeId, periodStart])
+  @@map("payroll_entries")
+}
+
+model PayrollEntryComponent {
+  id          String               @id @default(uuid()) @db.Uuid
+  entryId     String               @db.Uuid
+  type        PayrollComponentType
+  description String               @db.VarChar(255)
+  workDate    DateTime?            @db.Date
+  quantity    Decimal?             @db.Decimal(12, 4)
+  unit        String?              @db.VarChar(16)
+  rate        Decimal?             @db.Decimal(12, 4)
+  /// موجب للاستحقاق وسالب للخصم
+  amount      Decimal              @db.Decimal(12, 2)
+  /// مصدر البند (work_session / overtime_entry / leave_record / payroll_adjustment)
+  sourceType  String?              @db.VarChar(32)
+  sourceId    String?              @db.Uuid
+  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
+
+  entry PayrollEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId, type])
+  @@index([sourceType, sourceId])
+  @@map("payroll_entry_components")
+}
+
+/// مكافآت وخصومات وفروقات رواتب. فروقات فترة مغلقة تُعالج هنا ضمن فترة مفتوحة.
+model PayrollAdjustment {
+  id             String           @id @default(uuid()) @db.Uuid
+  employeeId     String           @db.Uuid
+  type           AdjustmentType
+  amount         Decimal          @db.Decimal(12, 2)
+  reason         String           @db.VarChar(255)
+  status         AdjustmentStatus @default(PENDING)
+  /// الفترة المغلقة الأصلية التي يصححها هذا الفرق (إن وجدت)
+  targetEntryId  String?          @db.Uuid
+  /// المستحق المفتوح الذي طُبِّق عليه
+  appliedEntryId String?          @db.Uuid
+  createdById    String           @db.Uuid
+  approvedById   String?          @db.Uuid
+  approvedAt     DateTime?        @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @db.Timestamptz(3)
+
+  employee     Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  targetEntry  PayrollEntry? @relation("AdjustmentTargetEntry", fields: [targetEntryId], references: [id], onDelete: Restrict)
+  appliedEntry PayrollEntry? @relation("AdjustmentAppliedEntry", fields: [appliedEntryId], references: [id], onDelete: Restrict)
+  createdBy    User          @relation("AdjustmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy   User?         @relation("AdjustmentApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  allocations SettlementAllocation[]
+
+  @@index([employeeId, status])
+  @@map("payroll_adjustments")
+}
+
+/// سجل العمليات المالية — لا يُحذف أبدًا (trigger). التصحيح بعملية عكسية تشير إلى الأصل.
+model FinancialTransaction {
+  id               String            @id @default(uuid()) @db.Uuid
+  employeeId       String            @db.Uuid
+  type             TransactionType
+  status           TransactionStatus @default(POSTED)
+  amount           Decimal           @db.Decimal(12, 2)
+  occurredAt       DateTime          @db.Timestamptz(3)
+  method           PaymentMethod?
+  /// من دفع (مستخدم النظام)
+  paidById         String?           @db.Uuid
+  /// من استلم
+  receivedBy       String?           @db.VarChar(150)
+  /// المرجع أو رقم الإيصال
+  reference        String?           @db.VarChar(100)
+  note             String?           @db.VarChar(255)
+  /// مفتاح منع التكرار عند إعادة إرسال الطلب
+  idempotencyKey   String            @unique @db.VarChar(64)
+  /// العملية الأصلية التي تعكسها هذه العملية (عكس واحد فقط لكل عملية)
+  reversesId       String?           @unique @db.Uuid
+  correctionReason String?           @db.VarChar(255)
+  payrollEntryId   String?           @db.Uuid
+  advanceAccountId String?           @db.Uuid
+  debtAccountId    String?           @db.Uuid
+  createdById      String            @db.Uuid
+  createdAt        DateTime          @default(now()) @db.Timestamptz(3)
+
+  employee       Employee              @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  paidBy         User?                 @relation("TransactionPaidBy", fields: [paidById], references: [id], onDelete: Restrict)
+  createdBy      User                  @relation("TransactionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reverses       FinancialTransaction? @relation("TransactionReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversedBy     FinancialTransaction? @relation("TransactionReversal")
+  payrollEntry   PayrollEntry?         @relation(fields: [payrollEntryId], references: [id], onDelete: Restrict)
+  advanceAccount AdvanceAccount?       @relation(fields: [advanceAccountId], references: [id], onDelete: Restrict)
+  debtAccount    DebtAccount?          @relation(fields: [debtAccountId], references: [id], onDelete: Restrict)
+
+  allocations   SettlementAllocation[]
+  debtMovements DebtMovement[]
+
+  @@index([employeeId, occurredAt])
+  @@index([type, status, occurredAt])
+  @@index([payrollEntryId])
+  @@index([method, occurredAt])
+  @@map("financial_transactions")
+}
+
+model AdvanceAccount {
+  id               String        @id @default(uuid()) @db.Uuid
+  employeeId       String        @db.Uuid
+  principalAmount  Decimal       @db.Decimal(12, 2)
+  remainingBalance Decimal       @db.Decimal(12, 2)
+  disbursedAt      DateTime      @db.Timestamptz(3)
+  status           AccountStatus @default(OPEN)
+  note             String?       @db.VarChar(255)
+  createdById      String        @db.Uuid
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
+
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdBy User     @relation("AdvanceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  transactions FinancialTransaction[]
+  allocations  SettlementAllocation[]
+
+  @@index([employeeId, status])
+  @@map("advance_accounts")
+}
+
+model DebtAccount {
+  id               String        @id @default(uuid()) @db.Uuid
+  employeeId       String        @db.Uuid
+  principalAmount  Decimal       @db.Decimal(12, 2)
+  remainingBalance Decimal       @db.Decimal(12, 2)
+  reason           String?       @db.VarChar(255)
+  incurredAt       DateTime      @db.Timestamptz(3)
+  status           AccountStatus @default(OPEN)
+  createdById      String        @db.Uuid
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
+
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdBy User     @relation("DebtCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  movements    DebtMovement[]
+  transactions FinancialTransaction[]
+  allocations  SettlementAllocation[]
+
+  @@index([employeeId, status])
+  @@map("debt_accounts")
+}
+
+model DebtMovement {
+  id            String           @id @default(uuid()) @db.Uuid
+  debtAccountId String           @db.Uuid
+  type          DebtMovementType
+  amount        Decimal          @db.Decimal(12, 2)
+  balanceAfter  Decimal          @db.Decimal(12, 2)
+  transactionId String?          @db.Uuid
+  createdById   String           @db.Uuid
+  createdAt     DateTime         @default(now()) @db.Timestamptz(3)
+
+  debtAccount DebtAccount           @relation(fields: [debtAccountId], references: [id], onDelete: Restrict)
+  transaction FinancialTransaction? @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  createdBy   User                  @relation("DebtMovementCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([debtAccountId, createdAt])
+  @@map("debt_movements")
+}
+
+/// توزيع عملية تسوية/دفع على الالتزام الأصلي (مستحق راتب، سلفة، دين، فرق راتب).
+model SettlementAllocation {
+  id               String               @id @default(uuid()) @db.Uuid
+  transactionId    String               @db.Uuid
+  targetType       SettlementTargetType
+  payrollEntryId   String?              @db.Uuid
+  advanceAccountId String?              @db.Uuid
+  debtAccountId    String?              @db.Uuid
+  adjustmentId     String?              @db.Uuid
+  amount           Decimal              @db.Decimal(12, 2)
+  createdAt        DateTime             @default(now()) @db.Timestamptz(3)
+
+  transaction    FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  payrollEntry   PayrollEntry?        @relation(fields: [payrollEntryId], references: [id], onDelete: Restrict)
+  advanceAccount AdvanceAccount?      @relation(fields: [advanceAccountId], references: [id], onDelete: Restrict)
+  debtAccount    DebtAccount?         @relation(fields: [debtAccountId], references: [id], onDelete: Restrict)
+  adjustment     PayrollAdjustment?   @relation(fields: [adjustmentId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+  @@index([payrollEntryId])
+  @@index([advanceAccountId])
+  @@index([debtAccountId])
+  @@map("settlement_allocations")
+}
+
+// ═════════════════════════════ النظام ═════════════════════════════
+
+/// عمليات المزامنة القادمة من الأجهاز (الدوام فقط). operationId يمنع التكرار.
+model SyncOperation {
+  id              String     @id @default(uuid()) @db.Uuid
+  operationId     String     @unique @db.VarChar(64)
+  deviceId        String     @db.VarChar(64)
+  userId          String     @db.Uuid
+  entityType      String     @db.VarChar(32)
+  entityId        String?    @db.Uuid
+  action          String     @db.VarChar(32)
+  payload         Json
+  /// رقم إصدار السجل الذي بُنيت عليه العملية (لاكتشاف التعارض)
+  baseVersion     Int?
+  clientCreatedAt DateTime   @db.Timestamptz(3)
+  receivedAt      DateTime   @default(now()) @db.Timestamptz(3)
+  status          SyncStatus @default(RECEIVED)
+  resultMessage   String?    @db.VarChar(255)
+  conflictData    Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, receivedAt])
+  @@index([status])
+  @@index([deviceId, receivedAt])
+  @@map("sync_operations")
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  type      NotificationType
+  title     String           @db.VarChar(150)
+  body      String           @db.VarChar(500)
+  data      Json?
+  readAt    DateTime?        @db.Timestamptz(3)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+model SystemSetting {
+  key         String   @id @db.VarChar(64)
+  value       Json
+  updatedById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  updatedBy User? @relation("SettingUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@map("system_settings")
+}
+
+model BackupRecord {
+  id             String       @id @default(uuid()) @db.Uuid
+  type           BackupType
+  status         BackupStatus @default(IN_PROGRESS)
+  storageKey     String?      @db.VarChar(255)
+  sizeBytes      BigInt?
+  checksumSha256 String?      @db.Char(64)
+  /// اسم آخر migration مطبَّق وقت أخذ النسخة (للتحقق قبل الاسترداد)
+  schemaVersion  String?      @db.VarChar(100)
+  encrypted      Boolean      @default(true)
+  startedAt      DateTime     @default(now()) @db.Timestamptz(3)
+  completedAt    DateTime?    @db.Timestamptz(3)
+  verifiedAt     DateTime?    @db.Timestamptz(3)
+  expiresAt      DateTime?    @db.Timestamptz(3)
+  errorMessage   String?      @db.VarChar(500)
+  triggeredById  String?      @db.Uuid
+
+  triggeredBy User? @relation("BackupTriggeredBy", fields: [triggeredById], references: [id], onDelete: Restrict)
+
+  @@index([type, status, startedAt])
+  @@index([expiresAt])
+  @@map("backup_records")
+}

@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "tests/e2e"
+
+# pnpm 10 يمنع سكربتات التثبيت افتراضيًا؛ نسمح فقط للحزم الموثوقة التي تحتاجها.
+onlyBuiltDependencies:
+  - "@nestjs/core"
+  - "@prisma/client"
+  - "@prisma/engines"
+  - "prisma"
+  - "esbuild"
+  - "sharp"
+  - "@swc/core"
+  - "unrs-resolver"

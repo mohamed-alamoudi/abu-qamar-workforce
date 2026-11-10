@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: abuqamar
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: abu_qamar_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U abuqamar -d abu_qamar_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      # قاعدة مؤقتة تُنشأ وتُحذف مع كل تشغيل — ليست سرًا حقيقيًا
+      DATABASE_URL_TEST: postgresql://abuqamar:ci_only_password@localhost:5433/abu_qamar_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test:unit
+      - run: pnpm test:integration
+      - run: pnpm build
+        env:
+          API_URL: http://localhost:4000

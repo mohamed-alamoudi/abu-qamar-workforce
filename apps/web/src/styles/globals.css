@@ -1,0 +1,87 @@
+@import 'tailwindcss';
+
+/* مكونات الحزمة المشتركة تُفحص أيضًا لاستخراج الأصناف */
+@source '../../../../packages/ui/src';
+
+/* الوضع الداكن عبر الصنف .dark على <html> (يُضبط قبل الرسم في layout.tsx) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* خطوط النظام الداعمة للعربية — بلا تحميل خطوط خارجية */
+  --font-sans: 'Segoe UI', 'Noto Sans Arabic', 'Noto Kufi Arabic', Tahoma, system-ui, -apple-system, sans-serif;
+
+  /* أزرق ملكي/كحلي للعناصر الأساسية */
+  --color-brand-50: #eef3fb;
+  --color-brand-100: #d9e4f5;
+  --color-brand-200: #b3c8ea;
+  --color-brand-300: #84a5da;
+  --color-brand-400: #557fc6;
+  --color-brand-500: #3461ad;
+  --color-brand-600: #244b90;
+  --color-brand-700: #1c3b73;
+  --color-brand-800: #162e59;
+  --color-brand-900: #10213f;
+
+  --color-success-600: #15803d;
+  --color-success-700: #166534;
+  --color-danger-600: #c62828;
+  --color-danger-700: #a31f1f;
+  --color-warning-500: #d97706;
+  --color-warning-700: #a15c07;
+}
+
+/* رموز الأسطح: تتبدل بين الوضعين دون تكرار أصناف dark: في كل مكوّن */
+:root {
+  --aq-bg: #f3f5f9;
+  --aq-surface: #ffffff;
+  --aq-subtle: #eef1f6;
+  --aq-line: #dde2ea;
+  --aq-ink: #162033;
+  --aq-muted: #5b6678;
+  color-scheme: light;
+}
+
+.dark {
+  --aq-bg: #0c1220;
+  --aq-surface: #141c2e;
+  --aq-subtle: #1c2740;
+  --aq-line: #2a3654;
+  --aq-ink: #e8edf6;
+  --aq-muted: #9aa6bd;
+  --color-success-700: #4ade80;
+  --color-danger-600: #f87171;
+  --color-warning-700: #fbbf24;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--aq-bg);
+  --color-surface: var(--aq-surface);
+  --color-subtle: var(--aq-subtle);
+  --color-line: var(--aq-line);
+  --color-ink: var(--aq-ink);
+  --color-muted: var(--aq-muted);
+}
+
+html {
+  background: var(--aq-bg);
+}
+
+body {
+  background: var(--aq-bg);
+  color: var(--aq-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* الأرقام المالية والأوقات بعرض ثابت حتى تصطف في الجداول */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

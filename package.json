@@ -1,0 +1,33 @@
+{
+  "name": "abu-qamar-workforce",
+  "version": "0.1.0",
+  "private": true,
+  "description": "نظام إدارة موظفي سوبر ماركت أبو قمر",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "pnpm build:packages && pnpm --parallel --filter @abu-qamar/api --filter @abu-qamar/web dev",
+    "dev:api": "pnpm build:packages && pnpm --filter @abu-qamar/api dev",
+    "dev:web": "pnpm --filter @abu-qamar/shared build && pnpm --filter @abu-qamar/web dev",
+    "build:packages": "pnpm --filter @abu-qamar/shared build && pnpm --filter @abu-qamar/database build",
+    "build:api": "pnpm build:packages && pnpm --filter @abu-qamar/api build",
+    "build:web": "pnpm --filter @abu-qamar/shared build && pnpm --filter @abu-qamar/web build",
+    "build": "pnpm build:api && pnpm --filter @abu-qamar/web build",
+    "start:api": "pnpm --filter @abu-qamar/api start:prod",
+    "start:web": "pnpm --filter @abu-qamar/web start",
+    "db:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml up -d",
+    "db:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml down",
+    "db:generate": "pnpm --filter @abu-qamar/database generate",
+    "db:migrate": "pnpm --filter @abu-qamar/database migrate:dev",
+    "db:deploy": "pnpm --filter @abu-qamar/database migrate:deploy",
+    "db:seed": "pnpm --filter @abu-qamar/database seed",
+    "admin:create": "pnpm --filter @abu-qamar/api admin:create",
+    "typecheck": "pnpm build:packages && pnpm -r typecheck",
+    "test": "pnpm test:unit",
+    "test:unit": "pnpm build:packages && pnpm -r test",
+    "test:integration": "pnpm build:packages && pnpm --filter @abu-qamar/api test:integration",
+    "test:e2e": "pnpm --filter @abu-qamar/e2e e2e"
+  }
+}

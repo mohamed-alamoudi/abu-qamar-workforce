@@ -1,0 +1,42 @@
+# قواعد بيانات PostgreSQL المحلية: واحدة للتطوير وأخرى معزولة للاختبارات.
+# التشغيل من جذر المستودع:  pnpm db:up   (يقرأ POSTGRES_PASSWORD من .env)
+name: abu-qamar
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: abuqamar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?ضع POSTGRES_PASSWORD في ملف .env}
+      POSTGRES_DB: abu_qamar_dev
+      TZ: UTC
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - abu_qamar_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abuqamar -d abu_qamar_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  db-test:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: abuqamar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?ضع POSTGRES_PASSWORD في ملف .env}
+      POSTGRES_DB: abu_qamar_test
+      TZ: UTC
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abuqamar -d abu_qamar_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  abu_qamar_pgdata:
