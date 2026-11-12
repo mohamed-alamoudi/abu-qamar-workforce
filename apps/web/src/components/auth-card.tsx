@@ -4,7 +4,6 @@ import { ThemeToggle } from './theme-toggle';
 
 export function BrandMark({ className = 'size-12' }: { className?: string }) {
   return (
-    // eslint-disable-next-line @next/next/no-img-element
     <img src="/icon.svg" alt="" aria-hidden className={className} />
   );
 }

@@ -10,7 +10,8 @@
     "admin:create": "tsx src/cli/create-admin.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest --config jest.config.js",
-    "test:integration": "jest --config jest.integration.config.js --runInBand"
+    "test:integration": "jest --config jest.integration.config.js --runInBand",
+    "backup": "node dist/cli/backups.js"
   },
   "dependencies": {
     "@abu-qamar/database": "workspace:*",

@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { CookieOptions } from 'express';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { APP_CONFIG, AppConfig } from '../common/config/env';
+import { Errors } from '../common/errors/app-exception';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { hmacBase64Url, randomToken, sha256Hex } from '../common/utils/crypto';
 
@@ -40,12 +41,13 @@ export class SessionService {
     return { token, session };
   }
 
-  async resolve(token: string): Promise<AuthContext | null> {
+  async resolve(token: string, reportDisabled = false): Promise<AuthContext | null> {
     const tokenHash = sha256Hex(token);
     const session = await this.prisma.session.findUnique({
       where: { tokenHash },
       include: { user: { include: { permissions: { include: { permission: { select: { key: true } } } } } } },
     });
+    if (reportDisabled && session && !session.user.isActive) throw Errors.accountDisabled();
     if (!session || session.revokedAt) return null;
 
     const now = Date.now();

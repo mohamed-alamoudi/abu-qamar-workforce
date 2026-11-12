@@ -51,5 +51,12 @@ E2E_ADMIN_USERNAME=... E2E_ADMIN_PASSWORD=... pnpm test:e2e
 
 ## ما لم يُغطَّ بعد
 
-اختبارات الدوام والرواتب والمالية والمزامنة والنسخ الاحتياطي تُكتب مع وحداتها (المراحل 3–6).
-الموجود منها الآن هو قيود قاعدة البيانات فقط.
+تُختبر وظائف الحضور والمالية والتقارير في فروعها. بعد الدمج أعد اختبارات المزامنة مع `AttendanceService` وإجراءات الواجهة الفعلية.
+
+## اختبارات منصة التشغيل
+
+- `pnpm lint` يفحص تطبيقَي API وWeb والحزم والاختبارات.
+- يستخدم اختبار النسخ أرشيف PostgreSQL فعليًا ويجرب استرداده إلى قاعدة مؤقتة باسم عشوائي. يطابق عدد الصفوف في كل جدول ويغيّر بايتًا من الملف المشفّر لاختبار رفضه.
+- على Windows مرّر `TEST_PG_DUMP_COMMAND="docker exec -i -e PGPASSWORD abu-qamar-db-test-1 pg_dump"` و`TEST_PG_RESTORE_COMMAND="docker exec -i -e PGPASSWORD abu-qamar-db-test-1 pg_restore"`، مع `TEST_PG_TOOLS_HOST=localhost` و`TEST_PG_TOOLS_PORT=5432`. يستخدم CI حاوية خدمة PostgreSQL الخاصة بالتشغيل. على جهاز يملك الأدوات الأصلية تكفي إتاحتها على PATH.
+- اختبارات Playwright تستعمل قاعدة محلية مخصصة. شغّل API على 4040 والواجهة على 3040 لفرع platform، واضبط `API_URL=http://localhost:4040` أثناء بناء الواجهة و`E2E_BASE_URL=http://localhost:3040`. جهز أدمن الاختبار واضبط `E2E_ADMIN_USERNAME` و`E2E_ADMIN_PASSWORD`، ثم نفّذ `pnpm --filter @abu-qamar/e2e install:browsers` و`pnpm test:e2e`. تُنشئ السيناريوهات سجلات اختبار في القاعدة المستهدفة.
+- شغّل الواجهة ببناء إنتاجي محلي لاختبار Service Worker. فعّل `E2E_BACKUPS=1` بعد تهيئة مفتاح وأدوات ومجلد النسخ في الخادم المحلي لتشغيل سيناريو النسخ من واجهة الأدمن.

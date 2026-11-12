@@ -16,3 +16,6 @@ test-results/
 .pgdata/
 *.dump
 *.sql.enc
+
+# النسخ الاحتياطية المحلية
+.backups/

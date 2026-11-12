@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { ServiceWorkerUpdate } from '@/components/pwa';
 import { AuthProvider } from '@/providers/auth-provider';
 import { THEME_INIT_SCRIPT, ThemeProvider } from '@/providers/theme-provider';
 import '@/styles/globals.css';
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="min-h-dvh antialiased">
         <ThemeProvider>
           <AuthProvider>{children}</AuthProvider>
+          <ServiceWorkerUpdate />
         </ThemeProvider>
       </body>
     </html>

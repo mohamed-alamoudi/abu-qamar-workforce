@@ -24,5 +24,5 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   // كل الصفحات عدا مسارات الـ API والملفات الثابتة
-  matcher: ['/((?!api/|_next/|icon.svg|manifest.webmanifest|favicon.ico).*)'],
+  matcher: ['/((?!api/|_next/|sw.js|offline.html|icon-192.png|icon-512.png|icon.svg|manifest.webmanifest|favicon.ico).*)'],
 };

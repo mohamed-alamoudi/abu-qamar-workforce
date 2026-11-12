@@ -14,7 +14,6 @@ import type {
   DeactivateEmployeeDto,
   EmployeesQueryDto,
   PayPolicyDto,
-  PayRateDto,
   TransferEmployeeDto,
   UpdateEmployeeDto,
 } from './dto/employees.dto';

@@ -34,9 +34,15 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:unit
       - run: pnpm test:integration
+        env:
+          TEST_PG_DUMP_COMMAND: docker exec -i -e PGPASSWORD ${{ job.services.postgres.id }} pg_dump
+          TEST_PG_RESTORE_COMMAND: docker exec -i -e PGPASSWORD ${{ job.services.postgres.id }} pg_restore
+          TEST_PG_TOOLS_HOST: localhost
+          TEST_PG_TOOLS_PORT: '5432'
       - run: pnpm build
         env:
           API_URL: http://localhost:4000

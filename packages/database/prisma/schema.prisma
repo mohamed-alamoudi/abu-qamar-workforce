@@ -212,6 +212,7 @@ model User {
   totpSecretEnc        String?
   totpPendingSecretEnc String?
   totpEnabledAt        DateTime? @db.Timestamptz(3)
+  totpLastUsedStep     Int?
   passwordChangedAt    DateTime  @default(now()) @db.Timestamptz(3)
   lastLoginAt          DateTime? @db.Timestamptz(3)
   createdById          String?   @db.Uuid

@@ -42,4 +42,13 @@ export const Errors = {
   conflict: (message: string) => new AppException(ERROR_CODES.CONFLICT, message, HttpStatus.CONFLICT),
   validation: (message: string, details?: unknown) =>
     new AppException(ERROR_CODES.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, details),
+  maintenance: () =>
+    new AppException(
+      ERROR_CODES.MAINTENANCE,
+      'النظام في وضع الصيانة (استرداد نسخة احتياطية). حاول مجددًا بعد قليل',
+      HttpStatus.SERVICE_UNAVAILABLE,
+    ),
+  backupNotConfigured: (message = 'النسخ الاحتياطي غير مهيأ: عرّف BACKUP_ENCRYPTION_KEY في إعدادات الخادم') =>
+    new AppException(ERROR_CODES.BACKUP_NOT_CONFIGURED, message, HttpStatus.SERVICE_UNAVAILABLE),
+  backupIntegrity: (message: string) => new AppException(ERROR_CODES.BACKUP_INTEGRITY, message, HttpStatus.UNPROCESSABLE_ENTITY),
 };

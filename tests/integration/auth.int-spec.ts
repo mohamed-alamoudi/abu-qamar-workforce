@@ -286,7 +286,8 @@ describe('المصادقة والجلسات', () => {
       expect(stored.totpPendingSecretEnc).not.toContain(secret);
 
       expect((await admin.post('/auth/2fa/enable', { code: '000000' })).status).toBe(400);
-      const enable = await admin.post('/auth/2fa/enable', { code: authenticator.generate(secret) });
+      const previousCode = authenticator.clone({ epoch: Date.now() - 30_000 }).generate(secret);
+      const enable = await admin.post('/auth/2fa/enable', { code: previousCode });
       expect(enable.status).toBe(200);
       expect(enable.body.recoveryCodes).toHaveLength(8);
 
@@ -298,9 +299,12 @@ describe('المصادقة والجلسات', () => {
       expect(badCode.status).toBe(401);
       expect(badCode.body.code).toBe('INVALID_TOTP');
 
-      const good = await new Client(ctx.app).login(ADMIN.username, ADMIN.password, { totpCode: authenticator.generate(secret) });
+      const usedCode = authenticator.generate(secret);
+      const good = await new Client(ctx.app).login(ADMIN.username, ADMIN.password, { totpCode: usedCode });
       expect(good.status).toBe(200);
       expect(good.body.user.totpEnabled).toBe(true);
+      const replay = await new Client(ctx.app).login(ADMIN.username, ADMIN.password, { totpCode: usedCode });
+      expect(replay.body.code).toBe('INVALID_TOTP');
 
       const recovery: string = enable.body.recoveryCodes[0];
       expect((await new Client(ctx.app).login(ADMIN.username, ADMIN.password, { totpCode: recovery })).status).toBe(200);

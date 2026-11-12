@@ -28,6 +28,13 @@
     "test": "pnpm test:unit",
     "test:unit": "pnpm build:packages && pnpm -r test",
     "test:integration": "pnpm build:packages && pnpm --filter @abu-qamar/api test:integration",
-    "test:e2e": "pnpm --filter @abu-qamar/e2e e2e"
+    "test:e2e": "pnpm --filter @abu-qamar/e2e e2e",
+    "lint": "eslint apps packages tests"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "fake-indexeddb": "^6.2.8",
+    "typescript-eslint": "^8.72.2"
   }
 }

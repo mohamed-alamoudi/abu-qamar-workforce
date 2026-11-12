@@ -3,6 +3,7 @@
 import { createContext, type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Input, Modal } from '@abu-qamar/ui';
 import { api, errorMessage, registerApiHandlers, setCsrfToken } from '@/lib/api';
+import { confirmAttendanceWipe } from '@/lib/attendance-queue';
 import type { SessionInfo, SessionUser } from '@/lib/types';
 
 type Status = 'loading' | 'authenticated' | 'anonymous';
@@ -13,7 +14,7 @@ interface AuthContextValue {
   /** يُستدعى بعد نجاح تسجيل الدخول */
   establish: (info: SessionInfo) => void;
   refresh: () => Promise<void>;
-  logout: () => Promise<void>;
+  logout: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -50,13 +51,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clear, establish]);
 
   const logout = useCallback(async () => {
+    if (user) {
+      const confirmed = await confirmAttendanceWipe(user.id).catch(() =>
+        window.confirm('تعذر مسح طابور الدوام على هذا الجهاز. هل تريد إنهاء الجلسة مع بقاء البيانات المحلية؟'),
+      );
+      if (!confirmed) return false;
+    }
     try {
       await api.post('/auth/logout', {}, { silentAuth: true });
     } catch {
       /* حتى لو فشل الطلب ننهي الجلسة محليًا */
     }
     clear();
-  }, [clear]);
+    return true;
+  }, [clear, user]);
 
   const closeReauth = useCallback((ok: boolean) => {
     setReauthOpen(false);
@@ -69,6 +77,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     registerApiHandlers({
       unauthenticated: clear,
+      attendanceAccountDisabled: () => {
+        clear();
+        if (user) void confirmAttendanceWipe(user.id).catch(() => undefined);
+      },
       reauth: () =>
         new Promise<boolean>((resolve) => {
           reauthResolver.current?.(false);
@@ -76,8 +88,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setReauthOpen(true);
         }),
     });
-    void refresh();
-  }, [clear, refresh]);
+  }, [clear, user]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
 
   const submitReauth = async (event: FormEvent) => {
     event.preventDefault();

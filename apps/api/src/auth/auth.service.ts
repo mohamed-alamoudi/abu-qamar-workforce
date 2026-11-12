@@ -128,7 +128,7 @@ export class AuthService {
       if (!dto.totpCode) throw Errors.totpRequired();
       const ok = this.totp.looksLikeRecoveryCode(dto.totpCode)
         ? await this.consumeRecoveryCode(user.id, dto.totpCode)
-        : this.totp.verify(user.totpSecretEnc, dto.totpCode);
+        : await this.consumeTotp(user.id, user.totpSecretEnc, dto.totpCode);
       if (!ok) {
         await this.failLogin(username, user.id, meta, 'INVALID_TOTP');
         throw Errors.invalidTotp();
@@ -310,18 +310,35 @@ export class AuthService {
     return { secret: generated.secret, otpauthUrl: generated.otpauthUrl };
   }
 
+  private async consumeTotp(userId: string, secretEnc: string, code: string): Promise<boolean> {
+    const step = this.totp.verifyStep(secretEnc, code);
+    if (step === null) return false;
+    const { count } = await this.prisma.user.updateMany({
+      where: {
+        id: userId,
+        isActive: true,
+        totpSecretEnc: secretEnc,
+        totpEnabledAt: { not: null },
+        OR: [{ totpLastUsedStep: null }, { totpLastUsedStep: { lt: step } }],
+      },
+      data: { totpLastUsedStep: step },
+    });
+    return count === 1;
+  }
+
   async totpEnable(auth: AuthContext, code: string, meta: RequestMeta) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: auth.user.id } });
     if (user.totpEnabledAt) throw Errors.conflict('المصادقة الثنائية مفعّلة مسبقًا');
     if (!user.totpPendingSecretEnc) throw Errors.validation('ابدأ إعداد المصادقة الثنائية أولًا');
     // 400 وليس 401: المستخدم مسجّل الدخول، والرمز الخاطئ هنا خطأ إدخال لا فشل مصادقة
-    if (!this.totp.verify(user.totpPendingSecretEnc, code)) throw Errors.validation('رمز التحقق غير صحيح');
+    const step = this.totp.verifyStep(user.totpPendingSecretEnc, code);
+    if (step === null) throw Errors.validation('رمز التحقق غير صحيح');
 
     const recovery = this.totp.generateRecoveryCodes();
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
-        where: { id: user.id },
-        data: { totpSecretEnc: user.totpPendingSecretEnc, totpPendingSecretEnc: null, totpEnabledAt: new Date() },
+        where: { id: user.id, totpEnabledAt: null, totpPendingSecretEnc: user.totpPendingSecretEnc },
+        data: { totpSecretEnc: user.totpPendingSecretEnc, totpPendingSecretEnc: null, totpEnabledAt: new Date(), totpLastUsedStep: step },
       });
       await tx.userRecoveryCode.deleteMany({ where: { userId: user.id } });
       await tx.userRecoveryCode.createMany({ data: recovery.hashes.map((codeHash) => ({ userId: user.id, codeHash })) });
@@ -334,7 +351,7 @@ export class AuthService {
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: auth.user.id },
-        data: { totpSecretEnc: null, totpPendingSecretEnc: null, totpEnabledAt: null },
+        data: { totpSecretEnc: null, totpPendingSecretEnc: null, totpEnabledAt: null, totpLastUsedStep: null },
       });
       await tx.userRecoveryCode.deleteMany({ where: { userId: auth.user.id } });
       await this.audit.log({ action: 'auth.2fa_disabled', actor: auth, entityType: 'user', entityId: auth.user.id, meta }, tx);

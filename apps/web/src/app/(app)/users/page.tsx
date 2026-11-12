@@ -76,7 +76,6 @@ function CreateUserModal({ open, onClose, onDone }: { open: boolean; onClose: ()
       setErrors({});
       setError(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const submit = async (event: FormEvent) => {

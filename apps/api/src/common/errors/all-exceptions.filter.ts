@@ -2,6 +2,7 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logge
 import { ThrottlerException } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { ApiErrorBody, ERROR_CODES } from '@abu-qamar/shared';
+import { ErrorMonitor } from './error-monitor';
 import { AppException } from './app-exception';
 
 const STATUS_CODES: Record<number, string> = {
@@ -31,11 +32,14 @@ const STATUS_MESSAGES: Record<number, string> = {
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('Exceptions');
 
+  constructor(private readonly monitor: ErrorMonitor) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const res = http.getResponse<Response>();
     const req = http.getRequest<Request>();
     const body = this.toBody(exception, req);
+    if (body.statusCode === 500) this.monitor.capture(exception);
     if (res.headersSent) return;
     res.status(body.statusCode).json(body);
   }
@@ -79,8 +83,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return { statusCode: 409, code: ERROR_CODES.CONFLICT, message: 'هذا السجل محمي ولا يمكن تعديله أو حذفه' };
     }
 
-    const err = exception instanceof Error ? exception : new Error(String(exception));
-    this.logger.error(`${req.method} ${req.path} → ${err.name}: ${err.message}`, err.stack);
+    this.logger.error(req.method + ' أخفق بطلب داخلي (500)');
     return { statusCode: HttpStatus.INTERNAL_SERVER_ERROR, code: ERROR_CODES.INTERNAL_ERROR, message: 'حدث خطأ غير متوقع' };
   }
 }

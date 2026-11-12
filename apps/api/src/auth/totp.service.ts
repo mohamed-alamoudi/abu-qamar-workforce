@@ -24,12 +24,20 @@ export class TotpService {
   }
 
   verify(secretEnc: string, code: string): boolean {
+    return this.verifyStep(secretEnc, code) !== null;
+  }
+
+  verifyStep(secretEnc: string, code: string): number | null {
     const token = code.replace(/\s+/g, '');
-    if (!/^\d{6}$/.test(token)) return false;
+    if (!/^\d{6}$/.test(token)) return null;
+    const epoch = Date.now();
+    const step = 30;
     try {
-      return authenticator.verify({ token, secret: decryptSecret(secretEnc, this.config.dataEncryptionKey, PURPOSE) });
+      const verifier = authenticator.clone({ epoch, step, window: 1 });
+      const delta = verifier.checkDelta(token, decryptSecret(secretEnc, this.config.dataEncryptionKey, PURPOSE));
+      return delta === null ? null : Math.floor(epoch / (step * 1000)) + delta;
     } catch {
-      return false;
+      return null;
     }
   }
 

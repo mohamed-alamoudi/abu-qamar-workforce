@@ -48,6 +48,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/users', label: 'المستخدمون والصلاحيات', icon: 'users', adminOnly: true },
   { href: '/audit', label: 'سجل التدقيق', icon: 'audit', adminOnly: true },
   { href: '/settings', label: 'الإعدادات', icon: 'settings', adminOnly: true },
+  { href: '/backups', label: 'النسخ الاحتياطية', icon: 'settings', adminOnly: true },
 ];
 
 export function isNavItemVisible(item: NavItem, subject: AccessSubject): boolean {
