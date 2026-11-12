@@ -43,7 +43,6 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'التقارير',
     icon: 'reports',
     anyOf: ['reports.attendance', 'reports.absence', 'reports.financial', 'reports.payments'],
-    plannedPhase: 5,
   },
   { href: '/users', label: 'المستخدمون والصلاحيات', icon: 'users', adminOnly: true },
   { href: '/audit', label: 'سجل التدقيق', icon: 'audit', adminOnly: true },
