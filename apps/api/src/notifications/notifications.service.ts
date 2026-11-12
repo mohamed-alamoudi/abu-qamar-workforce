@@ -20,7 +20,12 @@ export class NotificationsService {
   }
 
   /** إشعار للأدمن الرئيسي. لا يُفشل العملية الأصلية إن تعذر حفظ الإشعار. */
-  async notifyAdmin(n: NewNotification): Promise<void> {
+  async notifyAdmin(n: NewNotification, tx?: Prisma.TransactionClient): Promise<void> {
+    if (tx) {
+      const admin = await tx.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true } });
+      if (admin) await tx.notification.create({ data: { userId: admin.id, ...n } });
+      return;
+    }
     try {
       const admin = await this.prisma.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true } });
       if (admin) await this.notifyUser(admin.id, n);

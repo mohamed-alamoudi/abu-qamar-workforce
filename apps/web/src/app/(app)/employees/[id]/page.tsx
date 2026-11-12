@@ -21,6 +21,7 @@ import { useSettings } from '@/hooks/use-settings';
 import { api, errorMessage } from '@/lib/api';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import type { Department, DepartmentHistoryRow, Employee, EmployeeChange, PayHistory } from '@/lib/types';
+import { AttendancePanel } from '@/features/attendance/attendance';
 import { useAuth } from '@/providers/auth-provider';
 
 const TABS = [
@@ -667,7 +668,7 @@ export default function EmployeeProfilePage() {
             }}
           />
         )}
-        {tab === 'attendance' && <Planned phase={3} text="سجلات حضور وانصراف الموظف" />}
+        {tab === 'attendance' && <AttendancePanel employeeId={employee.id} quick={false} />}
         {tab === 'finance' && (
           <FinanceTab
             employee={employee}

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AttendanceModule } from './attendance/attendance.module';
+import { LeavesModule } from './leaves/leaves.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { SecurityGuard } from './common/auth/security.guard';
@@ -33,6 +35,8 @@ import { UsersModule } from './users/users.module';
     DashboardModule,
     DepartmentsModule,
     EmployeesModule,
+    AttendanceModule,
+    LeavesModule,
   ],
   controllers: [HealthController],
   providers: [

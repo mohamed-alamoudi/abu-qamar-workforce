@@ -35,8 +35,8 @@ export const NAV_ITEMS: NavItem[] = [
     icon: 'attendance',
     anyOf: ['attendance.view', 'attendance.check_in', 'attendance.check_out', 'attendance.correct'],
     primary: true,
-    plannedPhase: 3,
   },
+  { href: '/leaves', label: 'الإجازات والغياب', icon: 'attendance', anyOf: ['leaves.view', 'leaves.record'] },
   { href: '/payroll', label: 'الرواتب', icon: 'payroll', adminOnly: true, plannedPhase: 4 },
   {
     href: '/reports',

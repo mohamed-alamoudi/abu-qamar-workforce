@@ -110,8 +110,8 @@ export default function DashboardPage() {
 
   const actions = [
     { href: '/employees?new=1', label: 'إضافة موظف', icon: UserPlus, show: can(user, 'employees.create') },
-    { href: '/attendance', label: 'تسجيل حضور', icon: LogIn, show: can(user, 'attendance.check_in') },
-    { href: '/attendance', label: 'تسجيل انصراف', icon: LogOut, show: can(user, 'attendance.check_out') },
+    { href: '/attendance#quick-check-in', label: 'تسجيل حضور', icon: LogIn, show: can(user, 'attendance.check_in') },
+    { href: '/attendance#quick-check-out', label: 'تسجيل انصراف', icon: LogOut, show: can(user, 'attendance.check_out') },
     { href: '/payroll', label: 'عرض الرواتب', icon: Wallet, show: user?.role === 'ADMIN' },
     {
       href: '/reports',

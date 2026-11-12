@@ -257,6 +257,8 @@ model User {
   settingsUpdated          SystemSetting[]             @relation("SettingUpdatedBy")
   backupsTriggered         BackupRecord[]              @relation("BackupTriggeredBy")
 
+  attendanceOperations AttendanceOperation[]
+
   @@index([role, isActive])
   @@map("users")
 }
@@ -565,6 +567,7 @@ model WorkSession {
   corrections     AttendanceCorrection[]
   approvals       AttendanceApproval[]
   overtimeEntries OvertimeEntry[]
+  operations      AttendanceOperation[]
 
   @@index([employeeId, workDate])
   @@index([workDate, status])
@@ -1020,4 +1023,16 @@ model BackupRecord {
   @@index([type, status, startedAt])
   @@index([expiresAt])
   @@map("backup_records")
+}
+
+/// إيصالات العمليات تمنع إعادة تطبيق تسجيل أو تصحيح الدوام.
+model AttendanceOperation {
+  id        String @id @db.VarChar(64)
+  sessionId String @db.Uuid
+  actorId   String @db.Uuid
+  kind      String @db.VarChar(16)
+  session WorkSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  actor   User        @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@map("attendance_operations")
 }
