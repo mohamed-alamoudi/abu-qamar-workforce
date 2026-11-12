@@ -57,11 +57,10 @@ export class DashboardService {
           _sum: { netAmount: true, paidAmount: true },
         }),
       ]);
-      totalPayments = (payments._sum.amount ?? 0).toString();
+      totalPayments = payments._sum.amount?.toFixed(2) ?? '0.00';
       const net = unpaid._sum.netAmount;
       const paid = unpaid._sum.paidAmount;
       unpaidWages = net ? net.minus(paid ?? 0).toFixed(2) : '0.00';
-      totalPayments = Number(totalPayments).toFixed(2);
     }
 
     return {

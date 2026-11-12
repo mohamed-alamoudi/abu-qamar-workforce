@@ -37,7 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
     primary: true,
     plannedPhase: 3,
   },
-  { href: '/payroll', label: 'الرواتب', icon: 'payroll', adminOnly: true, plannedPhase: 4 },
+  { href: '/payroll', label: 'الرواتب', icon: 'payroll', anyOf: ['finance.view'] },
   {
     href: '/reports',
     label: 'التقارير',

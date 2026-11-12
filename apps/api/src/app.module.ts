@@ -15,6 +15,7 @@ import { HealthController } from './health/health.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { SettingsModule } from './settings/settings.module';
+import { PayrollModule } from './payroll/payroll.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -33,6 +34,7 @@ import { UsersModule } from './users/users.module';
     DashboardModule,
     DepartmentsModule,
     EmployeesModule,
+    PayrollModule,
   ],
   controllers: [HealthController],
   providers: [

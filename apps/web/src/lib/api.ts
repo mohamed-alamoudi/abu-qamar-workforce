@@ -19,6 +19,7 @@ export class ApiError extends Error {
 }
 
 interface RequestOptions {
+  idempotencyKey?: string;
   /** لا تعرض نافذة إعادة إدخال كلمة المرور (تُستخدم داخليًا عند إعادة المحاولة) */
   noReauth?: boolean;
   /** لا تعامل 401 كانتهاء جلسة (لشاشة الدخول والفحص الأولي) */
@@ -66,7 +67,13 @@ export function toApiError(status: number, payload: unknown): ApiError {
 async function request<T>(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, buildRequestInit(method, body, csrfToken));
+    const init = buildRequestInit(method, body, csrfToken);
+    if (options.idempotencyKey) {
+      const headers = new Headers(init.headers);
+      headers.set('Idempotency-Key', options.idempotencyKey);
+      init.headers = headers;
+    }
+    response = await fetch(`/api${path}`, init);
   } catch {
     throw new ApiError(0, 'NETWORK', 'تعذر الاتصال بالخادم. تحقق من اتصال الإنترنت');
   }
