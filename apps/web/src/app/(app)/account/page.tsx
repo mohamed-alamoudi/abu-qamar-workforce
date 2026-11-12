@@ -154,7 +154,6 @@ function TwoFactorCard() {
       {setup && (
         <form onSubmit={enable} className="mt-4 space-y-4">
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={setup.qr} alt="رمز QR لإضافة الحساب إلى تطبيق المصادقة" width={200} height={200} className="rounded-lg border border-line bg-white p-1" />
             <div className="space-y-2 text-sm">
               <p>1. امسح الرمز بتطبيق المصادقة (مثل Google Authenticator).</p>

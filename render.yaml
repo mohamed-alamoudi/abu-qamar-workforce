@@ -6,20 +6,16 @@
 services:
   - type: web
     name: abu-qamar-api
-    runtime: node
+    runtime: docker
     region: frankfurt
     plan: starter
-    # --prod=false: أدوات البناء (nest, prisma, typescript) ضمن devDependencies
-    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm build:api
-    # تطبيق الـ migrations قبل الإقلاع (آمن لنسخة واحدة من الخادم؛ migrate deploy لا يعيد تطبيق ما طُبِّق)
-    startCommand: pnpm db:deploy && pnpm start:api
+    numInstances: 1
+    dockerfilePath: ./infra/render/Dockerfile
     healthCheckPath: /health
     autoDeploy: false
     envVars:
       - key: NODE_ENV
         value: production
-      - key: NODE_VERSION
-        value: 22.12.0
       - key: DATABASE_URL
         fromDatabase:
           name: abu-qamar-db
@@ -44,6 +40,33 @@ services:
         value: lax
       - key: ENABLE_API_DOCS
         value: "false"
+      - fromGroup: abu-qamar-backup-storage
+
+  - type: cron
+    name: abu-qamar-backups
+    runtime: docker
+    region: frankfurt
+    schedule: "0 1 * * *"
+    dockerfilePath: ./infra/render/Dockerfile
+    dockerCommand: pnpm --filter @abu-qamar/api backup scheduled
+    envVars:
+      - key: APP_URL
+        value: https://localhost
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATA_ENCRYPTION_KEY
+        generateValue: true
+      - fromGroup: abu-qamar-backup-storage
+      - key: DATABASE_URL
+        fromDatabase:
+          name: abu-qamar-db
+          property: connectionString
+
+envVarGroups:
+  - name: abu-qamar-backup-storage
+    envVars:
+      - key: BACKUP_STORAGE_DRIVER
+        value: s3
 
 databases:
   - name: abu-qamar-db
@@ -52,3 +75,4 @@ databases:
     plan: basic-256mb
     region: frankfurt
     postgresMajorVersion: "16"
+    ipAllowList: []

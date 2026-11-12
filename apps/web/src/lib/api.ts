@@ -31,6 +31,7 @@ type Handlers = {
   reauth?: () => Promise<boolean>;
   /** يُستدعى عند انتهاء الجلسة */
   unauthenticated?: () => void;
+  attendanceAccountDisabled?: () => void;
 };
 
 // رمز CSRF يُحفظ في الذاكرة فقط (لا localStorage) ويُجدَّد من /auth/me عند تحميل الصفحة.
@@ -65,6 +66,11 @@ export function toApiError(status: number, payload: unknown): ApiError {
 }
 
 async function request<T>(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
+  const financial = /^\/(?:payroll|payroll-periods|finance|payments|advances|debts|settlements|financial-transactions|transactions)(?:[/?]|$)/.test(path) ||
+    /^\/employees\/[^/]+\/pay-(?:rates|policies)(?:[/?]|$)/.test(path);
+  if (financial && method !== 'GET' && typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new ApiError(0, 'NETWORK', 'العمليات المالية تتطلب اتصالًا بالخادم');
+  }
   let response: Response;
   try {
     const init = buildRequestInit(method, body, csrfToken);
@@ -91,6 +97,7 @@ async function request<T>(method: string, path: string, body?: unknown, options:
   if (response.ok) return payload as T;
 
   const error = toApiError(response.status, payload);
+  if (error.code === 'ACCOUNT_DISABLED' && path === '/sync/attendance') handlers.attendanceAccountDisabled?.();
   if (error.code === 'REAUTH_REQUIRED' && !options.noReauth && handlers.reauth) {
     if (await handlers.reauth()) return request<T>(method, path, body, { ...options, noReauth: true });
   }

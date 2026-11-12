@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 
 const username = process.env.E2E_ADMIN_USERNAME;
 const password = process.env.E2E_ADMIN_PASSWORD;
@@ -14,10 +15,10 @@ test.describe('تسجيل الدخول ولوحة التحكم', () => {
 
   test('بيانات خاطئة تعرض رسالة خطأ ولا تدخل', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel('اسم المستخدم').fill('no-such-user');
+    await page.getByLabel('اسم المستخدم').fill('missing_' + randomUUID().slice(0, 8));
     await page.getByLabel('كلمة المرور').fill('Wrong-Password-1');
     await page.getByRole('button', { name: 'دخول' }).click();
-    await expect(page.getByRole('alert')).toContainText('غير صحيحة');
+    await expect(page.getByRole('alert').filter({ hasText: 'غير صحيحة' })).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
   });
 

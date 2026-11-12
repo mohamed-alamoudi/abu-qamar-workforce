@@ -36,7 +36,7 @@ export class SecurityGuard implements CanActivate {
     if (rule.kind === 'public') return true;
 
     const token = req.cookies?.[this.config.sessionCookieName];
-    const auth = typeof token === 'string' && token ? await this.sessions.resolve(token) : null;
+    const auth = typeof token === 'string' && token ? await (req.path === '/sync/attendance' ? this.sessions.resolve(token, true) : this.sessions.resolve(token)) : null;
     if (!auth) throw Errors.unauthenticated();
     req.auth = auth;
 

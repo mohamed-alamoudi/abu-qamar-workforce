@@ -29,6 +29,8 @@ import { type NavIcon, type NavItem, visibleNavItems } from '@/lib/nav';
 import type { NotificationItem, Paginated, SearchResults, SessionUser } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { BrandMark } from './auth-card';
+import { AttendanceQueuePanel } from './attendance-queue-panel';
+import { ConnectionStatus } from './pwa';
 import { ThemeToggle } from './theme-toggle';
 
 const ICONS: Record<NavIcon, LucideIcon> = {
@@ -445,8 +447,7 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
   };
 
   const handleLogout = async () => {
-    await logout();
-    router.replace('/login');
+    if (await logout()) router.replace('/login');
   };
 
   return (
@@ -459,13 +460,17 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
           </Link>
           <GlobalSearch items={items} />
           <div className="ms-auto flex items-center gap-1">
+            <ConnectionStatus />
             <ThemeToggle />
             <NotificationsBell />
             <AccountMenu user={user} onLogout={handleLogout} />
           </div>
         </header>
         <main className="flex-1 px-3 pb-24 pt-5 sm:px-6 lg:pb-8">
-          <div className="mx-auto w-full max-w-6xl">{children}</div>
+          <div className="mx-auto w-full max-w-6xl">
+            <AttendanceQueuePanel key={user.id} userId={user.id} />
+            {children}
+          </div>
         </main>
       </div>
 

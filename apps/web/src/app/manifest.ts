@@ -1,6 +1,5 @@
 import type { MetadataRoute } from 'next';
 
-/** Web App Manifest — أساس الـ PWA (Service Worker والعمل دون إنترنت في المرحلة السادسة). */
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'نظام إدارة موظفي سوبر ماركت أبو قمر',
@@ -12,6 +11,9 @@ export default function manifest(): MetadataRoute.Manifest {
     display: 'standalone',
     background_color: '#f3f5f9',
     theme_color: '#244b90',
-    icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+    icons: [
+      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    ],
   };
 }

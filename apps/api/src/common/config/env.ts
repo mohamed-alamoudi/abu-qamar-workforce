@@ -48,6 +48,23 @@ const envSchema = z
     RATE_LIMIT_PER_MINUTE: intWithDefault(300, 1),
     LOGIN_RATE_LIMIT_PER_MINUTE: intWithDefault(10, 1),
     ENABLE_API_DOCS: boolWithDefault(false),
+    // ── النسخ الاحتياطي ──
+    BACKUP_ENCRYPTION_KEY: z.preprocess(emptyToUndefined, z.string().min(32, 'BACKUP_ENCRYPTION_KEY يجب ألا يقل عن 32 حرفًا').optional()),
+    BACKUP_STORAGE_DRIVER: z.preprocess(emptyToUndefined, z.enum(['local', 's3']).optional()),
+    BACKUP_LOCAL_DIR: optionalString,
+    BACKUP_STORAGE_BUCKET: optionalString,
+    BACKUP_STORAGE_REGION: optionalString,
+    BACKUP_STORAGE_ACCESS_KEY: optionalString,
+    BACKUP_STORAGE_SECRET_KEY: optionalString,
+    BACKUP_STORAGE_ENDPOINT: z.preprocess(emptyToUndefined, z.string().url('BACKUP_STORAGE_ENDPOINT يجب أن يكون رابطًا صالحًا').optional()),
+    BACKUP_STORAGE_PREFIX: optionalString,
+    BACKUP_STORAGE_FORCE_PATH_STYLE: z.preprocess(emptyToUndefined, z.string().optional()),
+    PG_DUMP_COMMAND: optionalString,
+    PG_RESTORE_COMMAND: optionalString,
+    PG_TOOLS_HOST: optionalString,
+    PG_TOOLS_PORT: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(65535).optional()),
+    // ── مراقبة الأخطاء (اختيارية) ──
+    SENTRY_DSN: z.preprocess(emptyToUndefined, z.string().url('SENTRY_DSN يجب أن يكون رابطًا صالحًا').optional()),
   })
   .superRefine((env, ctx) => {
     const strict = env.NODE_ENV === 'production' || env.NODE_ENV === 'staging';
@@ -60,6 +77,22 @@ const envSchema = z
     }
     if (strict && !env.APP_URL.startsWith('https://')) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['APP_URL'], message: 'APP_URL يجب أن يكون HTTPS في الإنتاج' });
+    }
+    if (env.BACKUP_ENCRYPTION_KEY && [env.SESSION_SECRET, env.DATA_ENCRYPTION_KEY].includes(env.BACKUP_ENCRYPTION_KEY)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['BACKUP_ENCRYPTION_KEY'],
+        message: 'BACKUP_ENCRYPTION_KEY يجب أن يختلف عن SESSION_SECRET و DATA_ENCRYPTION_KEY',
+      });
+    }
+    const s3 = env.BACKUP_STORAGE_DRIVER === 's3' || (!env.BACKUP_STORAGE_DRIVER && !!env.BACKUP_STORAGE_BUCKET);
+    if (s3) {
+      for (const key of ['BACKUP_STORAGE_BUCKET', 'BACKUP_STORAGE_REGION', 'BACKUP_STORAGE_ACCESS_KEY', 'BACKUP_STORAGE_SECRET_KEY'] as const) {
+        if (!env[key]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} مطلوب لتخزين النسخ على S3` });
+      }
+    }
+    if (strict && env.BACKUP_STORAGE_ENDPOINT && !env.BACKUP_STORAGE_ENDPOINT.startsWith('https://')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['BACKUP_STORAGE_ENDPOINT'], message: 'BACKUP_STORAGE_ENDPOINT يجب أن يكون HTTPS في الإنتاج' });
     }
     if (env.SESSION_SECRET === env.DATA_ENCRYPTION_KEY) {
       ctx.addIssue({
@@ -92,6 +125,56 @@ export interface AppConfig {
   rateLimitPerMinute: number;
   loginRateLimitPerMinute: number;
   enableApiDocs: boolean;
+  backup: BackupConfig;
+  /** عنوان خدمة مراقبة الأخطاء (متوافق مع Sentry). غير معرّف = المراقبة معطلة. */
+  sentryDsn?: string;
+}
+
+export interface BackupS3Config {
+  bucket: string;
+  region: string;
+  accessKey: string;
+  secretKey: string;
+  endpoint?: string;
+  forcePathStyle: boolean;
+}
+
+export interface BackupConfig {
+  /** غير معرّف = النسخ الاحتياطي معطل (يُرفض الطلب برسالة واضحة) */
+  encryptionKey?: string;
+  driver: 'local' | 's3';
+  localDir: string;
+  prefix: string;
+  s3?: BackupS3Config;
+  /** أمر تشغيل pg_dump / pg_restore (قد يكون عبر docker exec محليًا) مقسّمًا إلى أجزاء */
+  pgDumpCommand: string[];
+  pgRestoreCommand: string[];
+  /** العنوان والمنفذ كما تراهما أدوات PostgreSQL (يختلفان عن DATABASE_URL عند التشغيل داخل حاوية) */
+  pgToolsHost?: string;
+  pgToolsPort?: number;
+}
+
+/** "docker exec -i db pg_dump" أو مصفوفة JSON (لمسارات فيها مسافات). */
+export function parseCommand(value: string | undefined, fallback: string): string[] {
+  const text = (value ?? '').trim();
+  if (!text) return [fallback];
+  if (text.startsWith('[')) {
+    const parsed: unknown = JSON.parse(text);
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((p) => typeof p === 'string' && p)) return parsed as string[];
+    throw new Error('صيغة أمر أدوات PostgreSQL غير صالحة');
+  }
+  return text.split(/s+/);
+}
+
+function findRepoRoot(): string {
+  let dir = __dirname;
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -131,6 +214,30 @@ export function parseEnv(source: NodeJS.ProcessEnv): AppConfig {
     rateLimitPerMinute: env.RATE_LIMIT_PER_MINUTE,
     loginRateLimitPerMinute: env.LOGIN_RATE_LIMIT_PER_MINUTE,
     enableApiDocs: !isSecureEnv || env.ENABLE_API_DOCS,
+    backup: {
+      encryptionKey: env.BACKUP_ENCRYPTION_KEY,
+      driver: env.BACKUP_STORAGE_DRIVER ?? (env.BACKUP_STORAGE_BUCKET ? 's3' : 'local'),
+      localDir: env.BACKUP_LOCAL_DIR ?? join(findRepoRoot(), '.backups'),
+      prefix: (env.BACKUP_STORAGE_PREFIX ?? '').replace(/^\/+|\/+$/g, ''),
+      s3:
+        env.BACKUP_STORAGE_BUCKET && env.BACKUP_STORAGE_REGION && env.BACKUP_STORAGE_ACCESS_KEY && env.BACKUP_STORAGE_SECRET_KEY
+          ? {
+              bucket: env.BACKUP_STORAGE_BUCKET,
+              region: env.BACKUP_STORAGE_REGION,
+              accessKey: env.BACKUP_STORAGE_ACCESS_KEY,
+              secretKey: env.BACKUP_STORAGE_SECRET_KEY,
+              endpoint: env.BACKUP_STORAGE_ENDPOINT?.replace(/\/+$/, ''),
+              forcePathStyle: env.BACKUP_STORAGE_FORCE_PATH_STYLE
+                ? ['1', 'true', 'yes'].includes(env.BACKUP_STORAGE_FORCE_PATH_STYLE.toLowerCase())
+                : !!env.BACKUP_STORAGE_ENDPOINT,
+            }
+          : undefined,
+      pgDumpCommand: parseCommand(env.PG_DUMP_COMMAND, 'pg_dump'),
+      pgRestoreCommand: parseCommand(env.PG_RESTORE_COMMAND, 'pg_restore'),
+      pgToolsHost: env.PG_TOOLS_HOST,
+      pgToolsPort: env.PG_TOOLS_PORT,
+    },
+    sentryDsn: env.SENTRY_DSN,
   };
 }
 
