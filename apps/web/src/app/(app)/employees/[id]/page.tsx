@@ -22,6 +22,7 @@ import { api, errorMessage } from '@/lib/api';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import type { Department, DepartmentHistoryRow, Employee, EmployeeChange, PayHistory } from '@/lib/types';
 import { AttendancePanel } from '@/features/attendance/attendance';
+import { EmployeeBalances } from '@/features/finance/employee-balances';
 import { useAuth } from '@/providers/auth-provider';
 
 const TABS = [
@@ -357,6 +358,7 @@ function FinanceTab({ employee, currency, onChanged }: { employee: Employee; cur
   return (
     <div className="space-y-5">
       {error && <Alert>{error}</Alert>}
+      <EmployeeBalances employeeId={employee.id} currency={currency} />
       <Card className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

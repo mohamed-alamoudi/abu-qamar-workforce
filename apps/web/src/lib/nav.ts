@@ -37,7 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
     primary: true,
   },
   { href: '/leaves', label: 'الإجازات والغياب', icon: 'attendance', anyOf: ['leaves.view', 'leaves.record'] },
-  { href: '/payroll', label: 'الرواتب', icon: 'payroll', adminOnly: true, plannedPhase: 4 },
+  { href: '/payroll', label: 'الرواتب', icon: 'payroll', anyOf: ['finance.view'] },
   {
     href: '/reports',
     label: 'التقارير',
