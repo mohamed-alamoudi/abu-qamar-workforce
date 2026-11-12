@@ -16,6 +16,7 @@ import { EmployeesModule } from './employees/employees.module';
 import { HealthController } from './health/health.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { UsersModule } from './users/users.module';
@@ -39,6 +40,7 @@ import { UsersModule } from './users/users.module';
     AttendanceModule,
     LeavesModule,
     PayrollModule,
+    ReportsModule,
   ],
   controllers: [HealthController],
   providers: [

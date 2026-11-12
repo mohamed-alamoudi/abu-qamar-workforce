@@ -18,6 +18,7 @@ import {
   type PayFormState,
 } from '@/features/employees/pay';
 import { useSettings } from '@/hooks/use-settings';
+import { ReportsHub } from '@/features/reports/reports';
 import { api, errorMessage } from '@/lib/api';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import type { Department, DepartmentHistoryRow, Employee, EmployeeChange, PayHistory } from '@/lib/types';
@@ -681,7 +682,7 @@ export default function EmployeeProfilePage() {
             }}
           />
         )}
-        {tab === 'reports' && <Planned phase={5} text="تقارير الموظف" />}
+        {tab === 'reports' && <ReportsHub employeeId={employee.id} />}
         {tab === 'history' && <HistoryTab employeeId={employee.id} refreshKey={refreshKey} />}
       </div>
     </>
