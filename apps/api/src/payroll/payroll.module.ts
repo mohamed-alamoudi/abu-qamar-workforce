@@ -172,7 +172,7 @@ class LedgerController {
   @RequireReauth()
   @IdempotencyHeader()
   reverse(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ReversalDto, @Headers('idempotency-key') key: string | undefined, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
-    return this.ledger.reverse(id, dto.reason, key, { actor, meta });
+    return this.ledger.reverse(id, dto, key, { actor, meta });
   }
 }
 

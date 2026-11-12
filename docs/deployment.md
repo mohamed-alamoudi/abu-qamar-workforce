@@ -20,7 +20,7 @@ git remote add origin git@github.com:<الحساب>/abu-qamar-workforce.git
 git push -u origin main
 ```
 
-اجعل المستودع خاصًا. ملف `.github/workflows/ci.yml` يشغّل ESLint وفحص الأنواع والاختبارات (وحدة + تكامل على PostgreSQL) والبناء عند كل دفع.
+اجعل المستودع خاصًا. ملف `.github/workflows/ci.yml` يشغّل ESLint وفحص الأنواع واختبارات الوحدة والتكامل على PostgreSQL والبناء، ثم Playwright على نسخة مبنية وقاعدة متصفح مستقلة.
 
 ## 2) الخادم وقاعدة البيانات على Render
 

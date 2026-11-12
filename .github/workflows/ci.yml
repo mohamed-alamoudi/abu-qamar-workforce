@@ -34,6 +34,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level=high
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:unit
@@ -46,3 +47,48 @@ jobs:
       - run: pnpm build
         env:
           API_URL: http://localhost:4000
+
+      - name: Install Chromium for browser tests
+        run: pnpm --filter @abu-qamar/e2e exec playwright install --with-deps chromium
+      - name: Run browser tests on the production build
+        env:
+          APP_URL: http://localhost:3000
+          API_URL: http://localhost:4000
+          E2E_BASE_URL: http://localhost:3000
+          E2E_ADMIN_USERNAME: browser_admin
+          E2E_BACKUPS: '1'
+          PG_DUMP_COMMAND: docker exec -i -e PGPASSWORD ${{ job.services.postgres.id }} pg_dump
+          PG_RESTORE_COMMAND: docker exec -i -e PGPASSWORD ${{ job.services.postgres.id }} pg_restore
+          PG_TOOLS_HOST: localhost
+          PG_TOOLS_PORT: '5432'
+          BACKUP_STORAGE_DRIVER: local
+        run: |
+          docker exec "${{ job.services.postgres.id }}" createdb -U abuqamar abu_qamar_browser
+          export DATABASE_URL="${DATABASE_URL_TEST/abu_qamar_test/abu_qamar_browser}"
+          export SESSION_SECRET="$(openssl rand -hex 32)"
+          export DATA_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          export SETUP_TOKEN="$(openssl rand -hex 32)"
+          export BACKUP_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          export E2E_ADMIN_PASSWORD="Test-$(openssl rand -hex 20)"
+          export BACKUP_LOCAL_DIR="$(mktemp -d)"
+          pnpm db:deploy
+          NODE_ENV=development pnpm start:api &
+          api_pid=$!
+          NODE_ENV=production pnpm start:web &
+          web_pid=$!
+          trap 'kill "$api_pid" "$web_pid" 2>/dev/null || true' EXIT
+          curl --silent --show-error --fail --retry 30 --retry-all-errors --retry-delay 1 "$API_URL/health" > /dev/null
+          curl --silent --show-error --fail --retry 30 --retry-all-errors --retry-delay 1 "$APP_URL/login" > /dev/null
+          node --input-type=module <<'NODE'
+          const { API_URL, APP_URL, SETUP_TOKEN, E2E_ADMIN_USERNAME, E2E_ADMIN_PASSWORD } = process.env;
+          const response = await fetch(API_URL + '/auth/setup', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: APP_URL },
+            body: JSON.stringify({
+              setupToken: SETUP_TOKEN, username: E2E_ADMIN_USERNAME,
+              password: E2E_ADMIN_PASSWORD, fullName: 'مدير الاختبار',
+            }),
+          });
+          if (response.status !== 201) throw new Error('Browser test setup HTTP ' + response.status);
+          NODE
+          pnpm test:e2e --workers=1

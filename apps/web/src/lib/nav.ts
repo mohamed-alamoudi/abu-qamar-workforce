@@ -12,8 +12,6 @@ export interface NavItem {
   anyOf?: PermissionKey[];
   /** يظهر في شريط التنقل السفلي على الجوال */
   primary?: boolean;
-  /** المرحلة التي تُبنى فيها الوحدة إن لم تكن جاهزة بعد */
-  plannedPhase?: number;
 }
 
 /**
@@ -60,5 +58,3 @@ export function isNavItemVisible(item: NavItem, subject: AccessSubject): boolean
 export function visibleNavItems(subject: AccessSubject): NavItem[] {
   return NAV_ITEMS.filter((item) => isNavItemVisible(item, subject));
 }
-
-export const PLANNED_MODULES = NAV_ITEMS.filter((i) => i.plannedPhase !== undefined);

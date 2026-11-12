@@ -38,12 +38,10 @@ export class AttendanceOperationDto {
 
   @IsOptional()
   @IsISO8601({ strict: true }, { message: 'وقت الحضور غير صالح' })
-  @Matches(/T.*(?:Z|[+-]\d{2}:\d{2})$/, { message: 'وقت الحضور يحتاج منطقة زمنية' })
   checkInAt?: string;
 
   @IsOptional()
   @IsISO8601({ strict: true }, { message: 'وقت الانصراف غير صالح' })
-  @Matches(/T.*(?:Z|[+-]\d{2}:\d{2})$/, { message: 'وقت الانصراف يحتاج منطقة زمنية' })
   checkOutAt?: string;
 
   @IsOptional()

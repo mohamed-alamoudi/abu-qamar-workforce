@@ -39,7 +39,7 @@ test('إضافة مراقب من واجهة الإدارة', async ({ page }) =>
   await expect(page.getByText(name, { exact: true }).filter({ visible: true })).toBeVisible();
 });
 
-test('إضافة قسم ثم موظف من واجهة الإدارة', async ({ page }) => {
+test('إضافة موظف ومزامنة حضوره وانصرافه بعد عودة الاتصال', async ({ page, context }) => {
   const suffix = randomUUID().slice(0, 8);
   const department = 'قسم اختبار ' + suffix;
   const employee = 'موظف اختبار ' + suffix;
@@ -58,6 +58,26 @@ test('إضافة قسم ثم موظف من واجهة الإدارة', async ({ 
   await form.getByLabel(/قيمة الأجر/).fill('25');
   await form.getByRole('button', { name: 'إضافة الموظف', exact: true }).click();
   await expect(page.getByRole('heading', { name: employee, exact: true })).toBeVisible();
+
+  await page.goto('/attendance');
+  const quick = page.locator('#quick-check-in');
+  const select = quick.getByLabel('الموظف', { exact: true });
+  const option = select.getByRole('option', { name: new RegExp(employee) });
+  await expect(option).toHaveCount(1);
+  await select.selectOption(await option.getAttribute('value') ?? '');
+  await context.setOffline(true);
+  try {
+    await quick.getByRole('button', { name: 'تسجيل الحضور', exact: true }).click();
+    await expect(page.getByText('محفوظ محليًا · بانتظار تأكيد الخادم')).toBeVisible();
+    await quick.getByRole('button', { name: 'تسجيل الانصراف للوردية المحلية' }).click();
+    await expect(quick.getByRole('button', { name: 'تسجيل الانصراف للوردية المحلية' })).toHaveCount(0);
+  } finally {
+    await context.setOffline(false);
+  }
+  const queue = page.locator('details').filter({ hasText: 'مزامنة الدوام' });
+  await queue.locator('summary').click();
+  await expect(queue.getByText('تمت المزامنة', { exact: true })).toHaveCount(2);
+  await expect(page.getByRole('heading', { name: new RegExp(employee) })).toBeVisible();
 });
 
 test('الواجهة على الجوال ضمن عرض الشاشة', async ({ page, isMobile }) => {

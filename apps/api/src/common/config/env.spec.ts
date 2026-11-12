@@ -1,4 +1,4 @@
-import { parseEnv } from './env';
+import { parseCommand, parseEnv } from './env';
 
 const base = {
   DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
@@ -8,6 +8,13 @@ const base = {
 };
 
 describe('إعدادات البيئة', () => {
+  it('يفصل الأمر عن وسائط أدوات PostgreSQL', () => {
+    expect(parseCommand('  docker exec -i container pg_dump  ', 'pg_dump'))
+      .toEqual(['docker', 'exec', '-i', 'container', 'pg_dump']);
+    expect(parseCommand('["C:/Program Files/PostgreSQL/bin/pg_dump.exe"]', 'pg_dump'))
+      .toEqual(['C:/Program Files/PostgreSQL/bin/pg_dump.exe']);
+  });
+
   it('القيم الافتراضية الآمنة في التطوير', () => {
     const config = parseEnv({ ...base });
     expect(config).toMatchObject({

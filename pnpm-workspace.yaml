@@ -13,3 +13,9 @@ onlyBuiltDependencies:
   - "sharp"
   - "@swc/core"
   - "unrs-resolver"
+
+# النسخ المصححة للاعتماديات الانتقالية التي تثبتها الحزم الأم على إصدارات أقدم.
+overrides:
+  'next>postcss': '8.5.32'
+  '@prisma/config>deepmerge-ts': '8.0.0'
+  'exceljs>uuid': '11.1.1'

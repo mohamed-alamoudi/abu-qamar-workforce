@@ -10,9 +10,9 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { MaintenanceService } from '../maintenance/maintenance.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { NotificationsService } from '../notifications/notifications.service';
-import { SettingsModule, SettingsService } from '../settings/settings.module';
+import { AttendanceModule } from '../attendance/attendance.module';
 import { AttendanceAction, AttendanceBatchDto, AttendanceOperationDto } from './attendance-sync.dto';
-import { ATTENDANCE_WRITER, AttendanceVersionConflict, AttendanceWriter, DirectAttendanceWriter } from './attendance-writer';
+import { ATTENDANCE_WRITER, AttendanceVersionConflict, AttendanceWriter, SharedAttendanceWriter } from './attendance-writer';
 
 const permissions: Record<AttendanceAction, string> = {
   CHECK_IN: 'attendance.check_in',
@@ -29,17 +29,15 @@ class AttendanceSyncService {
     private readonly audit: AuditService,
     private readonly maintenance: MaintenanceService,
     private readonly notifications: NotificationsService,
-    private readonly settings: SettingsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(ATTENDANCE_WRITER) private readonly writer: AttendanceWriter,
   ) {}
 
   async batch(batch: AttendanceBatchDto, auth: AuthContext, meta: RequestMeta) {
     if (batch.userId !== auth.user.id) throw Errors.forbidden();
-    const timezone = (await this.settings.getAll())['general.timezone'];
     const results = [];
     for (const operation of batch.operations) {
-      const outcome = await this.process(operation, auth, meta, timezone);
+      const outcome = await this.process(operation, auth, meta);
       if (!outcome.duplicate && ['CONFLICT', 'REJECTED'].includes(outcome.record.status)) {
         await this.notifications.notifyAdmin({
           type: outcome.record.status === 'CONFLICT' ? 'ATTENDANCE_CONFLICT' : 'SYNC_FAILED',
@@ -61,7 +59,7 @@ class AttendanceSyncService {
     return { results };
   }
 
-  private async process(op: AttendanceOperationDto, auth: AuthContext, meta: RequestMeta, timezone: string) {
+  private async process(op: AttendanceOperationDto, auth: AuthContext, meta: RequestMeta) {
     for (let attempt = 0; ; attempt++) {
       if (this.maintenance.active) throw Errors.maintenance();
       try {
@@ -108,7 +106,7 @@ class AttendanceSyncService {
               const result = await this.writer[methods[op.action]](tx, {
                 ...op, clientOperationId: op.operationId,
                 actor: { ...auth, user: { ...auth.user, role: session.user.role, permissions: session.user.permissions.map(({ permission }) => permission.key) } },
-                meta, timezone,
+                meta,
               });
               data = { status: 'APPLIED', entityId: result.id, resultMessage: 'تمت مزامنة العملية' };
               await this.audit.log({
@@ -123,7 +121,7 @@ class AttendanceSyncService {
           }
           const record = await tx.syncOperation.update({ where: { id: initial.id }, data });
           return { record, duplicate: false };
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
       } catch (error) {
         if (attempt < 2 && error instanceof Prisma.PrismaClientKnownRequestError &&
             ['P2002', 'P2034'].includes(error.code)) continue;
@@ -164,8 +162,8 @@ class AttendanceSyncController {
 }
 
 @Module({
-  imports: [NotificationsModule, SettingsModule],
+  imports: [NotificationsModule, AttendanceModule],
   controllers: [AttendanceSyncController],
-  providers: [AttendanceSyncService, { provide: ATTENDANCE_WRITER, useClass: DirectAttendanceWriter }],
+  providers: [AttendanceSyncService, { provide: ATTENDANCE_WRITER, useClass: SharedAttendanceWriter }],
 })
 export class AttendanceSyncModule {}

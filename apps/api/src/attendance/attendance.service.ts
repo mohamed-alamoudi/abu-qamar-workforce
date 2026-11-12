@@ -7,6 +7,7 @@ import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { Errors } from '../common/errors/app-exception';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { addDays, formatDateOnly } from '../common/utils/dates';
+import { MaintenanceService } from '../maintenance/maintenance.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OvertimeService } from '../overtime/overtime.module';
 import { computeDeviations } from '../schedules/schedule-math';
@@ -40,7 +41,8 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
 
   constructor(private readonly db: PrismaService, private readonly audit: AuditService,
     private readonly settings: SettingsService, private readonly schedules: SchedulesService,
-    private readonly overtime: OvertimeService, private readonly notifications: NotificationsService) {}
+    private readonly overtime: OvertimeService, private readonly notifications: NotificationsService,
+    private readonly maintenance: MaintenanceService) {}
 
   onModuleInit() {
     this.timer = setInterval(() => {
@@ -52,6 +54,16 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy() { clearInterval(this.timer); }
 
   async scanMissing() {
+    if (this.maintenance.active) return;
+    const release = this.maintenance.trackRequest();
+    try {
+      await this.scanOpenShifts();
+    } finally {
+      release();
+    }
+  }
+
+  private async scanOpenShifts() {
     const zone = await this.timezone();
     const open = await this.db.workSession.findMany({ where: { status: 'OPEN', checkInAt: { lt: new Date(Date.now() - 60 * 60_000) } },
       include: { employee: { select: { fullName: true } } } });
@@ -111,15 +123,15 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       include: { correctedBy: { select: { fullName: true } } } });
   }
 
-  checkIn(input: CheckInInput, actor: AuthContext, meta: RequestMeta) {
-    return this.create('check-in', { ...input, checkInAt: input.at ?? new Date() }, actor, meta);
+  checkIn(input: CheckInInput, actor: AuthContext, meta: RequestMeta, transaction?: Db) {
+    return this.create('check-in', { ...input, checkInAt: input.at ?? new Date() }, actor, meta, transaction);
   }
 
-  manual(input: ManualInput, actor: AuthContext, meta: RequestMeta) {
-    return this.create('manual', input, actor, meta);
+  manual(input: ManualInput, actor: AuthContext, meta: RequestMeta, transaction?: Db) {
+    return this.create('manual', input, actor, meta, transaction);
   }
 
-  private async create(kind: 'check-in' | 'manual', input: ManualInput, actor: AuthContext, meta: RequestMeta) {
+  private async create(kind: 'check-in' | 'manual', input: ManualInput, actor: AuthContext, meta: RequestMeta, transaction?: Db) {
     this.authorize(actor, kind === 'manual' ? 'attendance.correct' : 'attendance.check_in');
     return this.operation(kind, input, actor, async tx => {
       await lockEmployee(tx, input.employeeId);
@@ -145,10 +157,10 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       if (checkOutAt) await this.overtime.refresh(tx, employee.id, workDate);
       await this.log(tx, kind, actor, meta, row);
       return row;
-    });
+    }, transaction);
   }
 
-  async checkOut(input: CheckOutInput, actor: AuthContext, meta: RequestMeta) {
+  async checkOut(input: CheckOutInput, actor: AuthContext, meta: RequestMeta, transaction?: Db) {
     this.authorize(actor, 'attendance.check_out');
     return this.operation('check-out', input, actor, async tx => {
       await lockEmployee(tx, input.employeeId);
@@ -168,10 +180,10 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       await this.overtime.refresh(tx, row.employeeId, row.workDate);
       await this.log(tx, 'check-out', actor, meta, after, row);
       return after;
-    });
+    }, transaction);
   }
 
-  async correct(id: string, input: CorrectionInput, actor: AuthContext, meta: RequestMeta) {
+  async correct(id: string, input: CorrectionInput, actor: AuthContext, meta: RequestMeta, transaction?: Db) {
     this.authorize(actor, 'attendance.correct');
     return this.operation('correct', input, actor, async tx => {
       const row = await this.lockedSession(tx, id, input.baseVersion ?? input.version);
@@ -203,7 +215,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       if (+workDate !== +row.workDate) await this.overtime.refresh(tx, row.employeeId, workDate);
       await this.log(tx, 'correct', actor, meta, after, row);
       return after;
-    });
+    }, transaction);
   }
 
   async transition(id: string, action: 'review' | 'approve' | 'void', version: number, actor: AuthContext, meta: RequestMeta, reason?: string) {
@@ -251,23 +263,25 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async operation(kind: Operation, options: OperationOptions, actor: AuthContext, run: (tx: Db) => Promise<WorkSession>) {
+  private async operation(kind: Operation, options: OperationOptions, actor: AuthContext, run: (tx: Db) => Promise<WorkSession>, transaction?: Db) {
     const clientId = options.clientOperationId;
-    try {
-      return await this.db.$transaction(async tx => {
-        if (clientId) {
-          if (!/^[A-Za-z0-9_-]{1,64}$/.test(clientId)) throw Errors.validation('معرّف العملية غير صالح');
-          await lockEmployee(tx, 'attendance-operation:' + clientId);
-          const prior = await tx.attendanceOperation.findUnique({ where: { id: clientId } });
-          if (prior) {
-            if (prior.actorId !== actor.user.id || prior.kind !== kind) throw Errors.conflict('معرّف العملية مستخدم مسبقًا');
-            return tx.workSession.findUniqueOrThrow({ where: { id: prior.sessionId }, include });
-          }
+    const write = async (tx: Db) => {
+      if (clientId) {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(clientId)) throw Errors.validation('معرّف العملية غير صالح');
+        await lockEmployee(tx, 'attendance-operation:' + clientId);
+        const prior = await tx.attendanceOperation.findUnique({ where: { id: clientId } });
+        if (prior) {
+          if (prior.actorId !== actor.user.id || prior.kind !== kind) throw Errors.conflict('معرّف العملية مستخدم مسبقًا');
+          return tx.workSession.findUniqueOrThrow({ where: { id: prior.sessionId }, include });
         }
-        const row = await run(tx);
-        if (clientId) await tx.attendanceOperation.create({ data: { id: clientId, sessionId: row.id, actorId: actor.user.id, kind } });
-        return row;
-      });
+      }
+      const row = await run(tx);
+      if (clientId) await tx.attendanceOperation.create({ data: { id: clientId, sessionId: row.id, actorId: actor.user.id, kind } });
+      return row;
+    };
+    if (transaction) return write(transaction);
+    try {
+      return await this.db.$transaction(write);
     } catch (error) {
       if (error instanceof Error && (error.message === overlapMessage || error.message.includes('work_sessions_no_overlap'))) {
         await this.notifications.notifyAdmin({ type: 'ATTENDANCE_CONFLICT', title: 'تعارض في الدوام', body: overlapMessage });

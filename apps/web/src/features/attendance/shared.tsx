@@ -15,7 +15,7 @@ export function useResource<T>(path: string | null, revision = 0) {
     let live = true;
     api.get<T>(path).then(
       data => { if (live) setState({ path, revision, data }); },
-      error => { if (live) setState({ path, revision, error: errorMessage(error) }); },
+      error => { if (live) setState(previous => ({ path, revision, data: previous.path === path ? previous.data : undefined, error: errorMessage(error) })); },
     );
     return () => { live = false; };
   }, [path, revision]);
@@ -42,7 +42,8 @@ export function useMutation() {
       setBusy(false);
     }
   }, []);
-  return { revision, busy, feedback, run };
+  const refresh = useCallback(() => setRevision(n => n + 1), []);
+  return { revision, busy, feedback, run, refresh };
 }
 
 export function Feedback({ error, success }: { error?: string; success?: string }) {

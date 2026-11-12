@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button, Card, Input, Modal, Select } from '@abu-qamar/ui';
 import { can } from '@abu-qamar/shared';
 import { LogIn, LogOut } from 'lucide-react';
 import { Pagination } from '@/components/page';
 import { api, toQuery } from '@/lib/api';
+import { ATTENDANCE_SYNCED, enqueueAttendance, QUEUE_CHANGED, readQueue, type AttendanceInput, type QueueItem } from '@/lib/attendance-queue';
 import { formatDuration } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
 import { DepartmentSelect, EmployeeSelect, Feedback, localTime, Submit, useMutation, useResource, type Department, type Employee, type Page } from './shared';
@@ -29,7 +30,23 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   const checkOut = can(subject, 'attendance.check_out');
   const correct = can(subject, 'attendance.correct');
   const admin = user?.role === 'ADMIN';
-  const { revision, busy, feedback, run } = useMutation();
+  const { revision, busy, feedback, run, refresh } = useMutation();
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+    const update = () => void readQueue(user.id).then(items => {
+      if (active) setQueue(items);
+    }).catch(() => {});
+    update();
+    window.addEventListener(QUEUE_CHANGED, update);
+    window.addEventListener(ATTENDANCE_SYNCED, refresh);
+    return () => {
+      active = false;
+      window.removeEventListener(QUEUE_CHANGED, update);
+      window.removeEventListener(ATTENDANCE_SYNCED, refresh);
+    };
+  }, [user?.id, refresh]);
   const [selected, setSelected] = useState('');
   const [department, setDepartment] = useState('');
   const [filter, setFilter] = useState({ employeeId: '', departmentId: '', from: '', to: '', status: '', approvalStatus: '' });
@@ -47,6 +64,15 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     dialog?.kind === 'history' ? '/attendance/' + dialog.row?.id + '/corrections' : null);
   const employees = staff.data ?? [];
   const availableDepartments = departments.data ?? [];
+  const pending = queue.filter(item => ['LOCAL', 'PENDING', 'SENDING'].includes(item.state));
+  const queuedOpen = pending.find(({ operation }) => operation.employeeId === selected &&
+    (operation.action === 'CHECK_IN' || (operation.action === 'MANUAL' && !operation.checkOutAt)) &&
+    !pending.some(item => item.operation.sessionId === operation.operationId && item.operation.action === 'CHECK_OUT'));
+  const pendingCheckout = (id: string) => pending.some(({ operation }) => operation.sessionId === id && operation.action === 'CHECK_OUT');
+  function storeOffline(operation: AttendanceInput) {
+    if (!user) return Promise.resolve(false);
+    return run(() => enqueueAttendance(user.id, operation), 'محفوظ محليًا · بانتظار تأكيد الخادم');
+  }
   const chosenOpen = open.data?.items.find(row => row.employeeId === selected);
   const changeFilter = (key: keyof typeof filter, value: string) => {
     setFilter(current => ({ ...current, [key]: value }));
@@ -62,6 +88,9 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     return run(() => api.post('/attendance/' + row.id + '/' + path, { version: row.version, ...extra }));
   }
   function checkout(row: Session) {
+    if (!navigator.onLine) return storeOffline({
+      action: 'CHECK_OUT', sessionId: row.id, baseVersion: row.version, checkOutAt: new Date().toISOString(),
+    });
     return run(() => api.post('/attendance/check-out', { employeeId: row.employeeId, sessionId: row.id, baseVersion: row.version }), 'تم تسجيل الانصراف');
   }
   const time = (at: string | null) => at ? localTime(at, zone) : 'غير مسجّل';
@@ -77,11 +106,16 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
         <DepartmentSelect departments={availableDepartments.filter(row => row.isActive)} value={department} onChange={setDepartment} />
       </div>}
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        {checkIn && <Button className="min-h-14" disabled={!selected || Boolean(chosenOpen)} loading={busy}
-          onClick={() => void run(() => api.post('/attendance/check-in', { employeeId: selected, departmentId: department || undefined }), 'تم تسجيل الحضور')}>
+        {checkIn && <Button className="min-h-14" disabled={!selected || Boolean(chosenOpen || queuedOpen)} loading={busy}
+          onClick={() => void (navigator.onLine
+            ? run(() => api.post('/attendance/check-in', { employeeId: selected, departmentId: department || undefined }), 'تم تسجيل الحضور')
+            : storeOffline({ action: 'CHECK_IN', employeeId: selected, departmentId: department || undefined, checkInAt: new Date().toISOString() }))}>
           <LogIn size={20} /> تسجيل الحضور
         </Button>}
-        {checkOut && chosenOpen && <Button className="min-h-14" variant="secondary" loading={busy} onClick={() => void checkout(chosenOpen)}>
+        {checkOut && queuedOpen && <Button className="min-h-14" variant="secondary" loading={busy}
+          onClick={() => void storeOffline({ action: 'CHECK_OUT', sessionId: queuedOpen.operation.operationId,
+            baseVersion: 1, checkOutAt: new Date().toISOString() })}><LogOut size={20} /> تسجيل الانصراف للوردية المحلية</Button>}
+        {checkOut && chosenOpen && <Button disabled={pendingCheckout(chosenOpen.id)} className="min-h-14" variant="secondary" loading={busy} onClick={() => void checkout(chosenOpen)}>
           <LogOut size={20} /> تسجيل الانصراف
         </Button>}
         {correct && <Button variant="secondary" className="min-h-14" disabled={!selected} onClick={() => showDialog('manual')}>إدخال يدوي</Button>}
@@ -108,7 +142,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
                 <Button variant="secondary" loading={busy} onClick={() => void action(row, 'breaks/start', { isPaid: false })}>استراحة غير مدفوعة</Button>
                 <Button variant="secondary" loading={busy} onClick={() => void action(row, 'breaks/start', { isPaid: true })}>استراحة مدفوعة</Button>
               </>}
-            {checkOut && <Button className="min-h-12" loading={busy} disabled={Boolean(activeBreak)} onClick={() => void checkout(row)}>
+            {checkOut && <Button className="min-h-12" loading={busy} disabled={Boolean(activeBreak) || pendingCheckout(row.id)} onClick={() => void checkout(row)}>
               <LogOut size={19} /> تسجيل الانصراف
             </Button>}
           </div>
@@ -189,6 +223,13 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
           checkOutAt: row?.checkOutAt && times.checkOutAt === localTime(row.checkOutAt, zone).replace(' ', 'T') ? undefined : times.checkOutAt || undefined,
           departmentId: times.departmentId || undefined,
         };
+        if (!navigator.onLine && dialog.kind !== 'void') {
+          const ok = await storeOffline(dialog.kind === 'manual'
+            ? { ...body, action: 'MANUAL', employeeId: selected }
+            : { ...body, action: 'CORRECTION', sessionId: row?.id, baseVersion: row?.version, reason: times.reason });
+          if (ok) setDialog(null);
+          return;
+        }
         const ok = await run(() => dialog.kind === 'manual' ? api.post('/attendance/manual', { ...body, employeeId: selected })
           : dialog.kind === 'void' ? api.post('/attendance/' + row?.id + '/void', { version: row?.version, reason: times.reason })
             : api.patch('/attendance/' + row?.id, { ...body, version: row?.version, reason: times.reason }));

@@ -27,7 +27,7 @@ const ledgerStatuses: Record<string, string> = {
   OPEN: 'قائم', SETTLED: 'مسدد', CANCELLED: 'ملغى', POSTED: 'مسجل', REVERSED: 'معكوس',
   PENDING: 'بانتظار الاعتماد', APPROVED: 'معتمد', APPLIED: 'مطبق',
 };
-type Action = { type: 'create' } | { type: 'repay' | 'reverse' | 'approve' | 'cancel'; id: string };
+type Action = { type: 'create' } | { type: 'repay' | 'approve' | 'cancel'; id: string } | { type: 'reverse'; id: string; canRecover: boolean };
 
 function EmployeeFields({ onSelect }: { onSelect: (id: string) => void }) {
   const [search, setSearch] = useState('');
@@ -124,7 +124,7 @@ function Accounts({ kind }: { kind: Kind }) {
         {admin && <div className="flex flex-wrap items-start gap-2">
           {row.status === 'OPEN' && <Button size="sm" variant="secondary" onClick={() => setAction({ type: 'repay', id: row.id })}>تسجيل سداد</Button>}
           {kind === 'financial-transactions' && row.status === 'POSTED' && row.type !== 'REVERSAL' && row.type !== 'REFUND' &&
-            <Button size="sm" variant="secondary" onClick={() => setAction({ type: 'reverse', id: row.id })}>عكس العملية</Button>}
+            <Button size="sm" variant="secondary" onClick={() => setAction({ type: 'reverse', id: row.id, canRecover: row.type === 'SALARY_PAYMENT' || row.type === 'ADVANCE_DISBURSEMENT' })}>عكس العملية</Button>}
           {kind === 'adjustments' && row.status === 'PENDING' &&
             <Button size="sm" onClick={() => setAction({ type: 'approve', id: row.id })}>اعتماد</Button>}
           {kind === 'adjustments' && (row.status === 'PENDING' || row.status === 'APPROVED') &&
@@ -140,6 +140,8 @@ function Accounts({ kind }: { kind: Kind }) {
     {action?.type === 'reverse' && <ActionForm title="عكس العملية المالية" path={`${path}/${action.id}/reverse`} idempotent onClose={close} onSaved={reload}>
       <p>سيُضاف قيد عكسي مرتبط بالعملية الأصلية وتُعاد الأرصدة.</p>
       <Input name="reason" label="سبب العكس" required minLength={2} maxLength={255} />
+      {action.canRecover && <Input name="recoverableAmount" label="المبلغ الذي استلمه الموظف ولم يُعِده (اختياري)"
+        inputMode="decimal" dir="ltr" pattern={'[0-9]{1,10}(\\.[0-9]{1,2})?'} />}
     </ActionForm>}
     {action && (action.type === 'approve' || action.type === 'cancel') && <ActionForm
       title={action.type === 'approve' ? 'اعتماد تعديل الراتب' : 'إلغاء تعديل الراتب'} path={`${path}/${action.id}/${action.type}`}

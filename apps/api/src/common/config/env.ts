@@ -163,7 +163,7 @@ export function parseCommand(value: string | undefined, fallback: string): strin
     if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((p) => typeof p === 'string' && p)) return parsed as string[];
     throw new Error('صيغة أمر أدوات PostgreSQL غير صالحة');
   }
-  return text.split(/s+/);
+  return text.split(/\s+/);
 }
 
 function findRepoRoot(): string {

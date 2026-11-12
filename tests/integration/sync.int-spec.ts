@@ -18,7 +18,7 @@ describe('مزامنة الحضور', () => {
     const operation = {
       action: 'CHECK_IN', operationId: randomUUID(), deviceId: randomUUID(),
       employeeId: employee.id, createdAt: new Date().toISOString(),
-      checkInAt: '2026-11-12T06:00:00.000Z',
+      checkInAt: new Date(Date.now() - 120 * 60_000).toISOString(),
     };
     return { supervisor, operation };
   }
@@ -35,12 +35,36 @@ describe('مزامنة الحضور', () => {
     expect(await ctx.prisma.workSession.count()).toBe(1);
   });
 
+  it('uses shared attendance rules for a disabled department', async () => {
+    const { supervisor, operation } = await fixture();
+    const department = await ctx.prisma.department.findFirstOrThrow();
+    await ctx.prisma.department.update({ where: { id: department.id }, data: { isActive: false } });
+    const response = await supervisor.client.post('/sync/attendance', { userId: supervisor.id, operations: [operation] }).expect(200);
+    expect(response.body.results[0]).toMatchObject({ status: 'REJECTED' });
+    expect(await ctx.prisma.workSession.count()).toBe(0);
+  });
+
+  it('applies a check-in followed by its offline checkout in a single batch', async () => {
+    const { supervisor, operation } = await fixture();
+    const checkout = {
+      action: 'CHECK_OUT', operationId: randomUUID(), deviceId: operation.deviceId,
+      createdAt: new Date().toISOString(), sessionId: operation.operationId,
+      baseVersion: 1, checkOutAt: new Date(Date.parse(operation.checkInAt) + 60 * 60_000).toISOString(),
+    };
+    const response = await supervisor.client.post('/sync/attendance', {
+      userId: supervisor.id, operations: [operation, checkout],
+    }).expect(200);
+    expect(response.body.results.map(({ status }: { status: string }) => status)).toEqual(['APPLIED', 'APPLIED']);
+    expect(await ctx.prisma.workSession.findFirstOrThrow()).toMatchObject({ status: 'CLOSED', workedMinutes: 60, version: 2 });
+    expect(await ctx.prisma.attendanceOperation.count()).toBe(2);
+  });
+
   it('records a version conflict between two devices', async () => {
     const { supervisor, operation } = await fixture();
     const applied = await supervisor.client.post('/sync/attendance', { userId: supervisor.id, operations: [operation] }).expect(200);
     const checkout = {
       action: 'CHECK_OUT', operationId: randomUUID(), deviceId: operation.deviceId, createdAt: operation.createdAt,
-      sessionId: applied.body.results[0].entityId, baseVersion: 1, checkOutAt: '2026-11-12T14:00:00.000Z',
+      sessionId: applied.body.results[0].entityId, baseVersion: 1, checkOutAt: new Date(Date.now() - 60 * 60_000).toISOString(),
     };
     const first = await supervisor.client.post('/sync/attendance', { userId: supervisor.id, operations: [checkout] }).expect(200);
     expect(first.body.results[0].status).toBe('APPLIED');

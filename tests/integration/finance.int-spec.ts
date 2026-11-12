@@ -59,6 +59,51 @@ describe('محرك الرواتب والحسابات المالية', () => {
     return (await admin.post(`/payroll/periods/${id}/close`).expect(201)).body.entries[0];
   }
 
+  it('يربط الدوام المعتمد بالراتب والتقرير ويحجب التصحيح المتأخر عند المزامنة', async () => {
+    await rate('HOURLY', '30');
+    await policy();
+    const attendance = await admin.post('/attendance/manual', {
+      employeeId, checkInAt: '2026-10-05T08:00:00Z', checkOutAt: '2026-10-05T10:00:00Z',
+    }).expect(201);
+    const row = attendance.body;
+    await admin.post('/attendance/' + row.id + '/review', { version: row.version }).expect(201);
+    await admin.post('/attendance/' + row.id + '/approve', { version: row.version + 1 }).expect(201);
+    const { id } = await period();
+    await calc(id);
+    const entry = await close(id);
+    expect(amount(entry.netAmount)).toBe('60.00');
+    const payment = await admin.post('/payments', {
+      payrollEntryId: entry.id, method: 'CASH', receivedBy: 'الموظف', reference: 'إيصال 1', amount: '20',
+    }).set('Idempotency-Key', randomUUID()).expect(201);
+
+    const report = await admin.get('/reports/financial?view=entries&from=2026-10-01&to=2026-10-31&employeeId=' + employeeId).expect(200);
+    expect(report.body.items).toEqual([expect.objectContaining({ netAmount: '60.00', paidAmount: '20.00', unpaidAmount: '40.00' })]);
+    const sync = await admin.post('/sync/attendance', { userId: adminId, operations: [{
+      action: 'CORRECTION', sessionId: row.id, baseVersion: row.version + 2,
+      operationId: randomUUID(), deviceId: randomUUID(), createdAt: new Date().toISOString(),
+      checkOutAt: '2026-10-05T11:00:00Z', reason: 'تصحيح الانصراف',
+    }] }).expect(200);
+    expect(sync.body.results[0]).toMatchObject({ status: 'CONFLICT', message: expect.stringContaining('رواتب مغلقة') });
+    expect(await ctx.prisma.workSession.findUnique({ where: { id: row.id } }))
+      .toMatchObject({ workedMinutes: 120, approvalStatus: 'APPROVED' });
+
+    const reversalPath = '/financial-transactions/' + payment.body.id + '/reverse';
+    const reversalKey = randomUUID();
+    const reverse = (recoverableAmount: string) => admin.post(reversalPath, {
+      reason: 'تصحيح قيد الدفع', recoverableAmount,
+    }).set('Idempotency-Key', reversalKey);
+    await reverse('21').expect(409);
+    const reversal = await reverse('12').expect(201);
+    expect((await reverse('12').expect(201)).body.id).toBe(reversal.body.id);
+    const movement = await ctx.prisma.debtMovement.findFirstOrThrow({
+      where: { transactionId: reversal.body.id }, include: { debtAccount: true },
+    });
+    expect(await ctx.prisma.debtAccount.count()).toBe(1);
+    expect(movement.type).toBe('INITIAL');
+    expect(movement.debtAccount.remainingBalance.toFixed(2)).toBe('12.00');
+    expect((await ctx.prisma.payrollEntry.findUniqueOrThrow({ where: { id: entry.id } })).paidAmount.toFixed(2)).toBe('0.00');
+  });
+
   it('يحسب الساعة على التاريخ المحلي مع سعرين وإضافي معتمد ومعلّق', async () => {
     await rate('HOURLY', '20', '2026-10-01', '2026-10-15');
     await rate('HOURLY', '30', '2026-10-16');

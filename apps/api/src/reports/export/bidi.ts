@@ -71,5 +71,5 @@ export function visualRuns(text: string, baseDirection: 'rtl' | 'ltr' = 'rtl'): 
 
 /** هل في النص حروف عربية؟ */
 export function hasArabic(text: string): boolean {
-  return /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/.test(text);
+  return /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-\uFEFF]/.test(text);
 }

@@ -3,9 +3,11 @@ import { IsIn, IsISO8601, IsOptional, IsString, IsUUID, Matches, MaxLength, MinL
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 
 const Trim = () => Transform(({ value }) => typeof value === 'string' ? value.trim() : value);
+const positiveAmount = /^(?!0(?:\.0{1,2})?$)(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/;
+
 export class MoneyDto {
   @IsString({ message: 'أدخل قيمة نصية' })
-  @Matches(/^(?!0(?:\.0{1,2})?$)(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/, { message: 'أدخل مبلغًا موجبًا بخانتين عشريتين على الأكثر' })
+  @Matches(positiveAmount, { message: 'أدخل مبلغًا موجبًا بخانتين عشريتين على الأكثر' })
   amount: string;
 
   @IsOptional()
@@ -80,6 +82,11 @@ export class SettlementDto extends MoneyDto {
 }
 
 export class ReversalDto {
+  @IsOptional()
+  @IsString({ message: 'أدخل مبلغ الاسترداد كنص' })
+  @Matches(positiveAmount, { message: 'أدخل مبلغ استرداد موجبًا بخانتين عشريتين على الأكثر' })
+  recoverableAmount?: string;
+
   @Trim()
   @IsString({ message: 'أدخل قيمة نصية' })
   @MinLength(2, { message: 'اكتب سببًا من حرفين على الأقل' })

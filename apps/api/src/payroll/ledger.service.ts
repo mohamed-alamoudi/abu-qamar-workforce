@@ -5,7 +5,7 @@ import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { paginate, toSkipTake } from '../common/dto/pagination.dto';
 import { Errors } from '../common/errors/app-exception';
 import { PrismaService } from '../common/prisma/prisma.service';
-import type { AdvanceDto, DebtDto, LedgerQueryDto, PaymentDetailsDto, PaymentDto, SettlementDto } from './dto/ledger.dto';
+import type { AdvanceDto, DebtDto, LedgerQueryDto, PaymentDetailsDto, PaymentDto, ReversalDto, SettlementDto } from './dto/ledger.dto';
 
 type Tx = Prisma.TransactionClient;
 type Actor = { actor: AuthContext; meta: RequestMeta };
@@ -177,7 +177,7 @@ export class LedgerService {
     });
   }
 
-  reverse(id: string, reason: string, key: string | undefined, context: Actor) {
+  reverse(id: string, { reason, recoverableAmount }: ReversalDto, key: string | undefined, context: Actor) {
     return this.post(key, 'REVERSAL', context, async (tx, idempotencyKey, createdById) => {
       await tx.$queryRaw`SELECT id FROM financial_transactions WHERE id = ${id}::uuid FOR UPDATE`;
       const original = await tx.financialTransaction.findUnique({ where: { id } });
@@ -186,6 +186,11 @@ export class LedgerService {
         throw Errors.conflict('لا يمكن عكس هذه العملية');
       }
       const { employeeId, amount, payrollEntryId, advanceAccountId, debtAccountId } = original;
+      const recoverable = recoverableAmount ? money(recoverableAmount) : null;
+      if (recoverable && !['SALARY_PAYMENT', 'ADVANCE_DISBURSEMENT'].includes(original.type)) {
+        throw Errors.validation('مبلغ الاسترداد متاح عند عكس دفعة راتب أو صرف سلفة');
+      }
+      if (recoverable) this.checkBalance(recoverable, amount);
       const entry = payrollEntryId && await this.entry(tx, payrollEntryId);
       const type = advanceAccountId ? 'ADVANCE' : 'DEBT';
       const accountId = advanceAccountId ?? debtAccountId;
@@ -204,6 +209,17 @@ export class LedgerService {
       if (account) {
         const balance = isDisbursement ? money('0') : account.remainingBalance.plus(amount);
         await this.changeAccount(tx, type, account.id, balance, reversal, 'REVERSAL', isDisbursement);
+      }
+      if (recoverable) {
+        const debt = await tx.debtAccount.create({ data: {
+          employeeId, principalAmount: recoverable, remainingBalance: recoverable,
+          reason: 'مبلغ مستلم يُسترد بعد عكس العملية المالية', incurredAt: reversal.occurredAt, createdById,
+          movements: { create: {
+            type: 'INITIAL', amount: recoverable, balanceAfter: recoverable, transactionId: reversal.id, createdById,
+          } },
+        } });
+        await this.audit.log({ ...context, action: 'finance.reversal.recovery', entityType: 'debt_account',
+          entityId: debt.id, after: { originalId: id, reversalId: reversal.id, amount: recoverable.toFixed(2) } }, tx);
       }
       return reversal;
     });

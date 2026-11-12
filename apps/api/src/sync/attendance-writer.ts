@@ -1,16 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@abu-qamar/database';
+import { lockEmployee } from '../attendance/attendance-common';
+import { AttendanceService } from '../attendance/attendance.service';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { Errors } from '../common/errors/app-exception';
-import { todayInZone } from '../common/utils/dates';
 import type { AttendanceOperationDto } from './attendance-sync.dto';
 
 export const ATTENDANCE_WRITER = Symbol('ATTENDANCE_WRITER');
-export type AttendanceWrite = Pick<AttendanceOperationDto, 'baseVersion' | 'employeeId' | 'departmentId' | 'sessionId' | 'checkInAt' | 'checkOutAt' | 'reason'> & {
+export type AttendanceWrite = Pick<AttendanceOperationDto, 'baseVersion' | 'deviceId' | 'employeeId' | 'departmentId' | 'sessionId' | 'checkInAt' | 'checkOutAt' | 'reason'> & {
   clientOperationId: string;
   actor: AuthContext;
   meta: RequestMeta;
-  timezone: string;
 };
 export type AttendanceWriteResult = { id: string; version: number };
 
@@ -27,93 +27,62 @@ export class AttendanceVersionConflict extends Error {
   }
 }
 
-function duration(start: Date, end: Date) {
-  if (end <= start) throw Errors.validation('وقت الانصراف يجب أن يلي وقت الحضور');
-  return Math.floor((end.getTime() - start.getTime()) / 60_000);
-}
-
 @Injectable()
-export class DirectAttendanceWriter implements AttendanceWriter {
+export class SharedAttendanceWriter implements AttendanceWriter {
+  constructor(private readonly attendance: AttendanceService) {}
+
   checkIn(tx: Prisma.TransactionClient, input: AttendanceWrite) {
-    return this.create(tx, input, false);
+    const { employeeId, checkInAt, departmentId, clientOperationId, actor, meta } = input;
+    if (!employeeId || !checkInAt || input.sessionId || input.baseVersion || input.checkOutAt) {
+      throw Errors.validation('بيانات تسجيل الحضور غير مكتملة أو غير صالحة');
+    }
+    return this.attendance.checkIn({ employeeId, at: checkInAt, departmentId, clientOperationId }, actor, meta, tx);
   }
 
   manual(tx: Prisma.TransactionClient, input: AttendanceWrite) {
-    return this.create(tx, input, true);
-  }
-
-  private async create(tx: Prisma.TransactionClient, input: AttendanceWrite, closed: boolean) {
-    if (!input.employeeId || !input.checkInAt || (closed && !input.checkOutAt) || input.baseVersion != null || input.sessionId) {
-      throw Errors.validation('بيانات تسجيل الدوام غير مكتملة أو غير صالحة');
+    const { employeeId, checkInAt, checkOutAt, departmentId, clientOperationId, actor, meta } = input;
+    if (!employeeId || !checkInAt || input.sessionId || input.baseVersion) {
+      throw Errors.validation('بيانات الإدخال اليدوي غير مكتملة أو غير صالحة');
     }
-    const employee = await tx.employee.findUnique({ where: { id: input.employeeId } });
-    if (!employee || employee.status !== 'ACTIVE') throw Errors.validation('الموظف غير موجود أو متوقف');
-    const departmentId = input.departmentId ?? employee.departmentId;
-    if (!departmentId) throw Errors.validation('حدد القسم الذي عمل فيه الموظف');
-    const checkInAt = new Date(input.checkInAt);
-    const checkOutAt = closed ? new Date(input.checkOutAt!) : null;
-    return tx.workSession.create({
-      data: {
-        employeeId: employee.id, departmentId, checkInAt, checkOutAt,
-        originalCheckInAt: checkInAt, originalCheckOutAt: checkOutAt,
-        status: closed ? 'CLOSED' : 'OPEN',
-        workedMinutes: checkOutAt ? duration(checkInAt, checkOutAt) : null,
-        workDate: todayInZone(input.timezone, checkInAt),
-        clientOperationId: input.clientOperationId,
-        createdById: input.actor.user.id,
-        source: 'OFFLINE_SYNC',
-      },
-      select: { id: true, version: true },
-    });
+    return this.attendance.manual({ employeeId, checkInAt, checkOutAt, departmentId, clientOperationId }, actor, meta, tx);
   }
 
-  checkOut(tx: Prisma.TransactionClient, input: AttendanceWrite) {
-    return this.update(tx, input, false);
+  async checkOut(tx: Prisma.TransactionClient, input: AttendanceWrite) {
+    if (!input.checkOutAt) throw Errors.validation('حدّد وقت الانصراف');
+    const row = await this.session(tx, input);
+    return this.attendance.checkOut({
+      employeeId: row.employeeId, sessionId: row.id, at: input.checkOutAt,
+      baseVersion: input.baseVersion, clientOperationId: input.clientOperationId,
+    }, input.actor, input.meta, tx);
   }
 
-  correction(tx: Prisma.TransactionClient, input: AttendanceWrite) {
-    return this.update(tx, input, true);
+  async correction(tx: Prisma.TransactionClient, input: AttendanceWrite) {
+    if (!input.reason?.trim()) throw Errors.validation('أدخل سبب التصحيح');
+    const row = await this.session(tx, input);
+    return this.attendance.correct(row.id, {
+      checkInAt: input.checkInAt, checkOutAt: input.checkOutAt, departmentId: input.departmentId,
+      reason: input.reason, baseVersion: input.baseVersion, clientOperationId: input.clientOperationId,
+    }, input.actor, input.meta, tx);
   }
 
-  private async update(tx: Prisma.TransactionClient, input: AttendanceWrite, correction: boolean) {
-    if (!input.sessionId || !input.baseVersion || (!correction && !input.checkOutAt) ||
-        (correction && (!input.reason?.trim() || (!input.checkInAt && !input.checkOutAt)))) {
-      throw Errors.validation('بيانات تعديل سجل الدوام غير مكتملة');
-    }
-    const session = await tx.workSession.findUnique({ where: { id: input.sessionId }, include: { breaks: true } });
-    if (!session) throw Errors.notFound('سجل الدوام غير موجود');
-    if (session.version !== input.baseVersion) throw new AttendanceVersionConflict(session.version);
-    if (session.status === 'VOIDED' || session.approvalStatus === 'APPROVED' || (!correction && session.status !== 'OPEN')) {
-      throw Errors.conflict('حالة سجل الدوام الحالية لا تسمح بالتعديل');
-    }
-    const checkInAt = correction && input.checkInAt ? new Date(input.checkInAt) : session.checkInAt;
-    const checkOutAt = input.checkOutAt ? new Date(input.checkOutAt) : session.checkOutAt;
-    let workedMinutes = checkOutAt ? duration(checkInAt, checkOutAt) : null;
-    for (const item of session.breaks) {
-      if (item.startAt < checkInAt || (checkOutAt && (!item.endAt || item.endAt > checkOutAt))) {
-        throw Errors.conflict('أوقات الدوام تتعارض مع الاستراحات المسجلة');
+  private async session(tx: Prisma.TransactionClient, input: AttendanceWrite) {
+    if (!input.sessionId || !input.baseVersion) throw Errors.validation('حدّد الوردية وإصدارها');
+    const where = { id: input.sessionId };
+    const select = { id: true, employeeId: true, version: true } as const;
+    let row = await tx.workSession.findUnique({ where, select });
+    if (!row) {
+      // A checkout queued on the same device can refer to a check-in by operation ID.
+      const receipt = await tx.syncOperation.findUnique({ where: { operationId: input.sessionId } });
+      const deviceId = (receipt?.payload as { deviceId?: string } | undefined)?.deviceId;
+      if (receipt?.entityId && receipt.userId === input.actor.user.id && deviceId === input.deviceId &&
+          receipt.status === 'APPLIED' && ['CHECK_IN', 'MANUAL'].includes(receipt.action)) {
+        row = await tx.workSession.findUnique({ where: { id: receipt.entityId }, select });
       }
-      if (workedMinutes !== null && item.endAt && !item.isPaid) workedMinutes -= duration(item.startAt, item.endAt);
     }
-    const after = await tx.workSession.update({
-      where: { id: session.id, version: input.baseVersion },
-      data: {
-        checkInAt, checkOutAt, workedMinutes,
-        workDate: todayInZone(input.timezone, checkInAt),
-        status: checkOutAt ? 'CLOSED' : 'OPEN',
-        originalCheckOutAt: correction ? session.originalCheckOutAt : checkOutAt,
-        updatedById: input.actor.user.id, version: { increment: 1 },
-      },
-    });
-    if (correction) {
-      await tx.attendanceCorrection.create({
-        data: {
-          sessionId: session.id, correctedById: input.actor.user.id, reason: input.reason,
-          before: { checkInAt: session.checkInAt.toISOString(), checkOutAt: session.checkOutAt?.toISOString() ?? null },
-          after: { checkInAt: after.checkInAt.toISOString(), checkOutAt: after.checkOutAt?.toISOString() ?? null },
-        },
-      });
-    }
-    return { id: after.id, version: after.version };
+    if (!row) throw Errors.notFound('سجل الدوام غير موجود');
+    await lockEmployee(tx, row.employeeId);
+    row = await tx.workSession.findUniqueOrThrow({ where: { id: row.id }, select });
+    if (row.version !== input.baseVersion) throw new AttendanceVersionConflict(row.version);
+    return row;
   }
 }

@@ -36,6 +36,7 @@ interface Result {
 }
 
 export const QUEUE_CHANGED = 'aq-attendance-queue';
+export const ATTENDANCE_SYNCED = 'aq-attendance-synced';
 const retiringUsers = new Set<string>();
 
 function open(userId: string): Promise<IDBDatabase> {
@@ -118,6 +119,7 @@ export async function flushAttendance(userId: string): Promise<void> {
         }
         const state = result.originalStatus === 'APPLIED' ? 'SYNCED' : result.originalStatus === 'CONFLICT' ? 'CONFLICT' : 'FAILED';
         await write(userId, { ...item, state, message: result.message, conflictData: result.conflictData });
+        if (state === 'SYNCED') window.dispatchEvent(new Event(ATTENDANCE_SYNCED));
       }
     } catch (error) {
       if (retiringUsers.has(userId)) return;
