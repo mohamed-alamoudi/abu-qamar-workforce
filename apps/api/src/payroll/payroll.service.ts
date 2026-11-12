@@ -1,12 +1,14 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { PayrollPeriod, Prisma } from '@abu-qamar/database';
 import { ERROR_CODES } from '@abu-qamar/shared';
+import { minutesBetween } from '../attendance/attendance-math';
 import { AuditService } from '../audit/audit.service';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { paginate, toSkipTake } from '../common/dto/pagination.dto';
 import { AppException, Errors } from '../common/errors/app-exception';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { addDays, formatDateOnly, parseDateOnly, todayInZone } from '../common/utils/dates';
+import { resolvePlannedShifts } from '../schedules/schedule-math';
 import { SettingsService } from '../settings/settings.module';
 import { calculateEntry } from './calc/calculator';
 import { monthEnd, monthKey, monthStart } from './calc/iso-dates';
@@ -154,16 +156,27 @@ export class PayrollService {
           blockers.push({ code: 'OVERTIME_PENDING', employeeId, recordId: overtime.id, message: 'يوجد عمل إضافي بانتظار القرار' });
         }
       }
+      const approvedLeaves = employee.leaveRecords.filter((row) => row.status === 'APPROVED').map((row) => ({
+        id: row.id, startDate: iso(row.startDate), endDate: iso(row.endDate),
+        paid: row.type === 'PAID_LEAVE' || row.type === 'PAID_EXCUSED_ABSENCE',
+        affectsPay: row.affectsPay && (row.type === 'UNPAID_ABSENCE' || row.type === 'UNPAID_LEAVE'),
+      }));
+      const plannedMinutes = new Map<string, number>();
+      if (approvedLeaves.some((row) => row.paid) && employee.payRates.some((rate) => rate.payType !== 'MONTHLY')) {
+        const planned = resolvePlannedShifts(employee.schedules, employee.scheduleShifts, startDate, endDate, timezone);
+        for (const shift of planned) {
+          const date = iso(shift.date);
+          plannedMinutes.set(date, (plannedMinutes.get(date) ?? 0) + minutesBetween(shift.startAt, shift.endAt));
+        }
+      }
       const result = calculateEntry({
         periodStart: iso(startDate), periodEnd: iso(endDate),
         rates: employee.payRates.map((row) => ({ ...row, ...span(row) })),
         policies: employee.payPolicies.map((row) => ({ ...row, ...span(row) })),
         sessions: sessions.map((row) => ({ ...row, workDate: iso(row.workDate), workedMinutes: row.workedMinutes ?? 0 })),
         overtime: usableOvertime.map((row) => ({ ...row, workDate: iso(row.workDate) })),
-        leaves: employee.leaveRecords.filter((row) => row.status === 'APPROVED').map((row) => ({
-          ...row, startDate: iso(row.startDate), endDate: iso(row.endDate),
-          affectsPay: row.affectsPay && (row.type === 'UNPAID_ABSENCE' || row.type === 'UNPAID_LEAVE'),
-        })),
+        leaves: approvedLeaves,
+        plannedMinutes,
         schedules: employee.schedules.map((row) => ({
           ...span(row), isFlexible: row.isFlexible,
           weekDays: Array.isArray(row.weeklyPattern)

@@ -1,0 +1,3 @@
+# This application is served by Next.js and NestJS.
+# Prevent Apache from serving the workspace, Git metadata, or local credentials.
+Require all denied

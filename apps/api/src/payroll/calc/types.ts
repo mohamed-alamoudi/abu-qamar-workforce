@@ -56,6 +56,7 @@ export interface LeaveInput {
   startDate: IsoDate;
   endDate: IsoDate;
   affectsPay: boolean;
+  paid?: boolean;
 }
 
 export interface ScheduleInput {
@@ -85,6 +86,7 @@ export interface CalcInput {
   schedules: ScheduleInput[];
   /** تواريخ محلية لورديات مجدولة بتاريخ محدد (جداول متغيرة) */
   scheduledShiftDates: IsoDate[];
+  plannedMinutes?: ReadonlyMap<IsoDate, number>;
   /** آخر يوم عمل (تاريخ إنهاء العمل) إن وُجد — الراتب الشهري لا يُستحق بعده */
   employmentEnd: IsoDate | null;
   adjustments: AdjustmentInput[];
@@ -107,6 +109,7 @@ export type WarningCode =
   | 'NO_RATE'
   | 'NO_POLICY'
   | 'OVERTIME_RATE_UNKNOWN'
+  | 'NO_SCHEDULE_FOR_PAID_LEAVE'
   | 'NO_SCHEDULE_FOR_DEDUCTION'
   | 'ABSENCE_CAPPED'
   | 'NEGATIVE_NET';

@@ -46,8 +46,8 @@ export default function LeavesPage() {
         <Input label="البداية" type="date" required value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} />
         <Input label="النهاية" type="date" required min={form.startDate} value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} />
         <Input label="السبب" maxLength={255} value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} />
-        <label className="flex items-center gap-2"><input type="checkbox" checked={form.affectsPay}
-          onChange={e => setForm({ ...form, affectsPay: e.target.checked })} /> تُخصم الأيام من الأجر</label>
+        {form.type.startsWith('UNPAID') && <label className="flex items-center gap-2"><input type="checkbox" checked={form.affectsPay}
+          onChange={e => setForm({ ...form, affectsPay: e.target.checked })} /> تُخصم الأيام من الأجر الشهري</label>}
         <div><Submit busy={busy}>تسجيل للمراجعة</Submit></div>
       </form>
     </Card>}
@@ -62,7 +62,7 @@ export default function LeavesPage() {
       {list.data?.items.map(row => <article className="space-y-2 rounded-lg border border-line p-3" key={row.id}>
         <h2 className="font-semibold">{row.employee.fullName} · {types[row.type]}</h2>
         <p className="text-sm">{row.startDate.slice(0, 10)} – {row.endDate.slice(0, 10)} · {statuses[row.status]}</p>
-        <p className="text-sm text-muted">سجّلها {row.recordedBy.fullName} · {row.affectsPay ? 'تُخصم من الأجر' : 'دون خصم'} {row.reason && '· ' + row.reason}</p>
+        <p className="text-sm text-muted">سجّلها {row.recordedBy.fullName} · {row.type.startsWith('PAID') ? 'مدفوعة بعد الاعتماد' : row.affectsPay ? 'تُخصم من الأجر الشهري' : 'دون خصم من الأجر الشهري'} {row.reason && '· ' + row.reason}</p>
         {admin && (row.status === 'PENDING' || row.status === 'APPROVED') && <div className="flex flex-wrap gap-2">
           {(row.status === 'PENDING' ? [['APPROVED', 'اعتماد'], ['REJECTED', 'رفض']] : [['CANCELLED', 'إلغاء']]).map(([value, label]) =>
             <Button key={value} variant={value === 'APPROVED' ? 'primary' : 'secondary'} loading={busy}

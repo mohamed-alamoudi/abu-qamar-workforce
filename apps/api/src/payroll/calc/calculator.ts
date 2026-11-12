@@ -283,8 +283,47 @@ export function calculateEntry(input: CalcInput): CalcResult {
     });
   }
 
-  // ── خصم الغياب غير المدفوع من الراتب الشهري ──
   const schedule = new ScheduleIndex(input.schedules, input.scheduledShiftDates);
+  // الأجر الشهري يغطي الإجازة المدفوعة أصلًا. للساعة واليوم تُحتسب مدة العمل المقررة في يوم الإجازة.
+  for (const leave of input.leaves.filter((row) => row.paid)) {
+    const from = leave.startDate > periodStart ? leave.startDate : periodStart;
+    const to = leave.endDate < periodEnd ? leave.endDate : periodEnd;
+    for (const date of from <= to ? eachDay(from, to) : []) {
+      if (!employed(date) || worked.has(date)) continue;
+      const rate = rateOn(date);
+      if (rate?.payType === 'MONTHLY') continue;
+      if (schedule.hasSchedule(date) && !schedule.isWorkDay(date)) continue;
+      if (!rate) {
+        warn('NO_RATE', 'إجازة مدفوعة دون أجر سارٍ بتاريخ ' + date, true, date);
+        continue;
+      }
+      const minutes = input.plannedMinutes?.get(date);
+      if (!minutes) {
+        warn('NO_SCHEDULE_FOR_PAID_LEAVE', 'حدّد ساعات العمل المقررة للإجازة المدفوعة بتاريخ ' + date, true, date);
+        continue;
+      }
+      let divisor = SIXTY;
+      if (rate.payType === 'DAILY') {
+        const policy = policyOn(date);
+        if (policy?.dailyPayMode === 'FULL') {
+          divisor = new Decimal(minutes);
+        } else if (policy?.dailyPayMode === 'PROPORTIONAL' && policy.referenceDailyHours?.gt(0)) {
+          divisor = SIXTY.times(policy.referenceDailyHours);
+        } else {
+          warn('NO_POLICY', 'حدّد سياسة الأجر اليومي للإجازة المدفوعة بتاريخ ' + date, true, date);
+          continue;
+        }
+      }
+      components.push({
+        type: 'REGULAR_WAGE', description: 'إجازة أو غياب مدفوع بتاريخ ' + date,
+        workDate: date, quantity: round4(new Decimal(minutes).div(divisor)), unit: rate.payType === 'HOURLY' ? 'hour' : 'day',
+        rate: rate.amount, amount: roundMoney(rate.amount.times(minutes).div(divisor)),
+        sourceType: 'leave_record', sourceId: leave.id,
+      });
+    }
+  }
+
+  // ── خصم الغياب غير المدفوع من الراتب الشهري ──
   const absence = new Map<string, Group>();
   for (const leave of input.leaves) {
     if (!leave.affectsPay) continue;

@@ -49,6 +49,7 @@ class LeavesService {
 
   async record(dto: LeaveDto, actor: AuthContext, meta: RequestMeta) {
     if (dto.endDate < dto.startDate) throw Errors.validation('تاريخ النهاية يسبق البداية');
+    if (dto.affectsPay && dto.type.startsWith('PAID_')) throw Errors.validation('لا يمكن خصم إجازة أو غياب مدفوع من الأجر');
     const row = await this.db.$transaction(async tx => {
       await lockEmployee(tx, dto.employeeId);
       if (!(await tx.employee.findUnique({ where: { id: dto.employeeId } }))) throw Errors.notFound('الموظف غير موجود');

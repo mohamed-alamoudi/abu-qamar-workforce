@@ -143,6 +143,38 @@ describe('محرك الرواتب والحسابات المالية', () => {
   });
 
   it.each([
+    ['HOURLY', null, '30', '180.00'],
+    ['DAILY', 'FULL', '120', '120.00'],
+    ['DAILY', 'PROPORTIONAL', '120', '90.00'],
+    ['MONTHLY', null, '3100', '3100.00'],
+  ] as const)('يدفع الإجازة المعتمدة وفق سياسة %s / %s', async (payType, dailyPayMode, value, expected) => {
+    await rate(payType, value);
+    await policy({ dailyPayMode, referenceDailyHours: dailyPayMode === 'PROPORTIONAL' ? '8' : null });
+    const leaveBody = {
+      employeeId, type: 'PAID_LEAVE', affectsPay: false, startDate: '2026-10-05', endDate: '2026-10-06',
+    };
+    await admin.post('/leaves', { ...leaveBody, affectsPay: true }).expect(400);
+    const leave = await admin.post('/leaves', leaveBody).expect(201);
+    await admin.post('/leaves/' + leave.body.id + '/decision', { status: 'APPROVED' }).expect(201);
+    const { id } = await period();
+    if (payType !== 'MONTHLY') {
+      const draft = await calc(id);
+      expect(draft.blockers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'NO_SCHEDULE_FOR_PAID_LEAVE' }),
+      ]));
+    }
+    await ctx.prisma.employeeSchedule.create({ data: {
+      employeeId, createdById: adminId, effectiveFrom: d('2026-10-01'),
+      weeklyPattern: [{ day: 1, start: '08:00', end: '14:00' }],
+    } });
+    const draft = await calc(id);
+    expect(draft.blockers).toEqual([]);
+    expect(amount(draft.entries[0].netAmount)).toBe(expected);
+    expect(draft.entries[0].components.filter((row: { sourceType: string }) => row.sourceType === 'leave_record'))
+      .toHaveLength(payType === 'MONTHLY' ? 0 : 1);
+  });
+
+  it.each([
     ['ACTUAL_MONTH_DAYS', '3000.00'], // 3100 - 3100 ÷ 31 = 3000.
     ['FIXED_DAYS', '2945.00'], // 3100 - 3100 ÷ 20 = 2945.
     ['SCHEDULED_WORK_DAYS', '2480.00'], // خمسة أيام اثنين في مارس 2026: 3100 - 3100 ÷ 5 = 2480.
