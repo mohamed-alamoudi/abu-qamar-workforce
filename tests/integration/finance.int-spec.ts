@@ -148,7 +148,8 @@ describe('محرك الرواتب والحسابات المالية', () => {
   it('يعيد قائمة موانع الدوام والإجازات ويمنح المراقب القراءة فقط', async () => {
     await rate('HOURLY', '30');
     await policy();
-    const date = '2026-10-05';
+    // الوردية المفتوحة تمتد إلى ما لا نهاية في قيد منع التداخل، فتأتي بعد الوردية غير المعتمدة.
+    const date = '2026-10-08';
     const start = new Date(`${date}T06:00:00.000Z`);
     await ctx.prisma.workSession.create({ data: {
       employeeId, departmentId, workDate: d(date), checkInAt: start, originalCheckInAt: start, createdById: adminId,
