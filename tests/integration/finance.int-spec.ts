@@ -59,6 +59,31 @@ describe('محرك الرواتب والحسابات المالية', () => {
     return (await admin.post(`/payroll/periods/${id}/close`).expect(201)).body.entries[0];
   }
 
+  it('يحذف حساب فترة قيد المراجعة مع حفظ الدوام ويمنع حذف الفترة المعتمدة', async () => {
+    await rate('HOURLY', '30');
+    await policy();
+    const attendance = await shift('2026-10-05', 120);
+    const draft = await period();
+    const path = '/payroll/periods/' + draft.id;
+    await admin.post(path + '/review').expect(201);
+    expect(await ctx.prisma.payrollEntry.count({ where: { periodId: draft.id } })).toBe(1);
+    const supervisor = await createSupervisor(ctx, admin, ['finance.view']);
+    await supervisor.client.delete(path).expect(403);
+    await admin.delete(path).expect(403);
+    await reauth();
+    await admin.delete(path).expect(200);
+    await admin.get(path).expect(404);
+    expect(await ctx.prisma.workSession.count({ where: { id: attendance.id } })).toBe(1);
+    expect(await ctx.prisma.auditLog.count({ where: { action: 'payroll.period.delete', entityId: draft.id } })).toBe(1);
+    const replacement = await period();
+    const replacementPath = '/payroll/periods/' + replacement.id;
+    await admin.post(replacementPath + '/review').expect(201);
+    await admin.post(replacementPath + '/approve').expect(201);
+    await admin.delete(replacementPath).expect(409);
+    await admin.post(replacementPath + '/close').expect(201);
+    await admin.delete(replacementPath).expect(409);
+  });
+
   it('يحدث فترة مغلقة جزئيًا دون المساس بدفعة عامل ويضيف عاملًا جديدًا بعد اعتماد دوامه', async () => {
     await rate('HOURLY', '30');
     await policy();

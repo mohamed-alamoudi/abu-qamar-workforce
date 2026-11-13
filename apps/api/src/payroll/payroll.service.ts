@@ -90,6 +90,30 @@ export class PayrollService {
     });
   }
 
+  async remove(id: string, actor: AuthContext, meta: RequestMeta) {
+    if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
+    return this.db.$transaction(async tx => {
+      await lockPayroll(tx);
+      await tx.$queryRaw`SELECT id FROM payroll_entries WHERE "periodId" = ${id}::uuid ORDER BY id FOR UPDATE`;
+      const period = await this.get(id, tx);
+      if (period.status !== 'DRAFT' && period.status !== 'IN_REVIEW') {
+        throw Errors.conflict('يمكن حذف المسودات والفترات قيد المراجعة فقط');
+      }
+      const linked = await tx.payrollEntry.findFirst({
+        where: { periodId: id, OR: [financiallyLinkedEntry, { adjustmentsApplied: { some: {} } }] },
+        select: { id: true },
+      });
+      if (linked) throw Errors.conflict('لا يمكن حذف فترة مرتبطة بدفعة أو تسوية أو فرق راتب');
+
+      await tx.payrollEntry.deleteMany({ where: { periodId: id } });
+      await tx.payrollPeriod.delete({ where: { id } });
+      await this.audit.log({ action: 'payroll.period.delete', actor, meta, entityType: 'payroll_period', entityId: id,
+        before: { label: period.label, status: period.status, frequency: period.frequency,
+          startDate: iso(period.startDate), endDate: iso(period.endDate), entries: period.entries.length } }, tx);
+      return { deleted: true };
+    }, { timeout: 30_000 });
+  }
+
   async reopen(id: string, reason: string, actor: AuthContext, meta: RequestMeta) {
     if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
     return this.db.$transaction(async tx => {

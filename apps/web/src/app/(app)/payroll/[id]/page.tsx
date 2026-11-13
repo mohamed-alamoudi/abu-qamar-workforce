@@ -1,18 +1,19 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Alert, Button, Card, Input } from '@abu-qamar/ui';
+import { Alert, Button, Card, Input, Modal } from '@abu-qamar/ui';
 import { PageHeader } from '@/components/page';
 import { ActionForm, FinanceAccess, FinanceLinks, MoneyFields, financialPost, statuses, useFinanceData, type Blocker, type Entry, type PeriodDetail } from '@/features/finance/common';
 import { useSettings } from '@/hooks/use-settings';
-import { ApiError, errorMessage } from '@/lib/api';
+import { api, ApiError, errorMessage } from '@/lib/api';
 import { formatDate, formatMoney } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
 
 type RefreshResult = { added: number; updated: number; protected: number; blockers: Blocker[] };
 
 function Details({ id }: { id: string }) {
+  const router = useRouter();
   const { user } = useAuth();
   const settings = useSettings();
   const currency = settings['general.currency'];
@@ -25,6 +26,8 @@ function Details({ id }: { id: string }) {
   const [refreshResult, setRefreshResult] = useState<RefreshResult | null>(null);
   const [reopen, setReopen] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [issues, setIssues] = useState<Blocker[] | null>(null);
@@ -50,13 +53,35 @@ function Details({ id }: { id: string }) {
 
   const row = period.data;
   const admin = user?.role === 'ADMIN';
+  const canDelete = admin && (row?.status === 'DRAFT' || row?.status === 'IN_REVIEW');
+  async function removePeriod() {
+    setBusy(true);
+    setDeleteError('');
+    try {
+      await api.delete(periodPath);
+      router.replace('/payroll');
+    } catch (cause) {
+      setDeleteError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
   const blockers = issues ?? checklist.data?.blockers;
   const search = employeeSearch.trim().toLowerCase();
   const entries = row?.entries.filter(entry => (entry.employee.fullName + ' ' + entry.employee.code).toLowerCase().includes(search)) ?? [];
   return <>
     <PageHeader title={row?.label ?? 'تفاصيل فترة الرواتب'}
+      actions={canDelete && <Button variant="danger" disabled={busy} onClick={() => { setDeleteError(''); setConfirmDelete(true); }}>حذف الفترة</Button>}
       description={row && `${statuses[row.status]} · ${formatDate(row.startDate, 'UTC')} — ${formatDate(row.endDate, 'UTC')}` || undefined} />
     <FinanceLinks />
+    {confirmDelete && <Modal open title="حذف فترة الرواتب" onClose={() => { if (!busy) setConfirmDelete(false); }}>
+      <p className="mb-4">سيُحذف حساب الفترة من قائمة الرواتب. يبقى دوام الموظفين محفوظًا.</p>
+      {deleteError && <Alert className="mb-4">{deleteError}</Alert>}
+      <div className="flex gap-2">
+        <Button variant="danger" loading={busy} onClick={() => void removePeriod()}>تأكيد الحذف</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => setConfirmDelete(false)}>إلغاء</Button>
+      </div>
+    </Modal>}
     {(error || period.error || checklist.error) && <Alert className="mb-4">{error || period.error || checklist.error}</Alert>}
     {row && row.status !== 'CLOSED' && <Card className="mb-5 space-y-3 p-4">
       <h2 className="font-bold">قائمة التحقق قبل الإغلاق</h2>

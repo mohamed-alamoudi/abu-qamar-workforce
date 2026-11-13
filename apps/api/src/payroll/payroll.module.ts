@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Module, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Module, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiCookieAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { Auth, Meta, RequirePermissions, RequireReauth } from '../common/auth/decorators';
@@ -45,6 +45,12 @@ class PayrollController {
   @RequireReauth()
   reopen(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ReopenPeriodDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
     return this.periods.reopen(id, dto.reason, actor, meta);
+  }
+
+  @Delete('periods/:id')
+  @RequireReauth()
+  remove(@Param('id', ParseUUIDPipe) id: string, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+    return this.periods.remove(id, actor, meta);
   }
 
   @Post('periods/:id/refresh-unpaid')
