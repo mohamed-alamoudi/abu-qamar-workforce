@@ -26,5 +26,5 @@ export async function syncReferenceData(prisma: PrismaClient): Promise<void> {
         update: {},
       });
     }
-  });
+  }, { timeout: 30_000 });
 }
