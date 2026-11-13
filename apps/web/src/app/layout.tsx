@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   title: { default: 'نظام إدارة موظفي سوبر ماركت أبو قمر', template: '%s — أبو قمر' },
   description: 'إدارة الموظفين والحضور والانصراف والرواتب في سوبر ماركت أبو قمر',
   robots: { index: false, follow: false },
+  icons: { icon: '/icon-192.png?v=2', apple: '/icon-192.png?v=2' },
 };
 
 export const viewport: Viewport = {

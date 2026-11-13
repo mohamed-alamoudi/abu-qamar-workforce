@@ -4,7 +4,7 @@ import { ThemeToggle } from './theme-toggle';
 
 export function BrandMark({ className = 'size-12' }: { className?: string }) {
   return (
-    <img src="/icon.svg" alt="" aria-hidden className={className} />
+    <img src="/icon-192.png?v=2" alt="" aria-hidden className={`rounded-lg object-contain ${className}`} />
   );
 }
 
@@ -17,7 +17,7 @@ export function AuthCard({ title, subtitle, children }: { title: string; subtitl
       </div>
       <div className="w-full max-w-md">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <BrandMark className="size-16" />
+          <BrandMark className="size-32" />
           <div>
             <p className="text-sm text-muted">نظام إدارة موظفي</p>
             <p className="text-xl font-bold text-ink">سوبر ماركت أبو قمر</p>

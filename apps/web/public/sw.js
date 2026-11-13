@@ -1,7 +1,7 @@
 /* Only versioned assets and the public offline page are stored. */
-const CACHE = 'aq-shell-v4';
+const CACHE = 'aq-shell-v5';
 const SHELL = '/offline.html';
-const PUBLIC_ASSETS = [SHELL, '/offline-attendance.js', '/icon-192.png', '/icon-512.png'];
+const PUBLIC_ASSETS = [SHELL, '/offline-attendance.js', '/icon-192.png?v=2', '/icon-512.png?v=2'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PUBLIC_ASSETS)));
@@ -25,7 +25,7 @@ self.addEventListener('push', event => {
   if (typeof id !== 'string') return;
   event.waitUntil(self.registration.showNotification('سوبر ماركت أبو قمر', {
     body: 'عندك إشعار جديد في النظام.',
-    icon: '/icon-192.png',
+    icon: '/icon-192.png?v=2',
     tag: id,
   }));
 });
@@ -49,7 +49,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(fetch(request).catch(async () => (await caches.match(SHELL)) || Response.error()));
     return;
   }
-  if (!PUBLIC_ASSETS.includes(url.pathname) && !url.pathname.startsWith('/_next/static/')) return;
+  if (!PUBLIC_ASSETS.includes(url.pathname + url.search) && !url.pathname.startsWith('/_next/static/')) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const cached = await cache.match(request);
