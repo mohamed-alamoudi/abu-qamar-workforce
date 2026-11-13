@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PayType, Prisma } from '@abu-qamar/database';
 import { can } from '@abu-qamar/shared';
 import { AuditService } from '../audit/audit.service';
+import { lockEmployee } from '../attendance/attendance-common';
+import { financiallyLinkedEntry } from '../payroll/payroll-entry-state';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { paginate, toSkipTake } from '../common/dto/pagination.dto';
 import { Errors } from '../common/errors/app-exception';
@@ -263,10 +265,11 @@ export class EmployeesService {
     const today = await this.today();
     const terminationDate = dto.terminationDate ?? today;
     if (terminationDate > today) throw Errors.validation('تاريخ إنهاء العمل لا يكون في المستقبل');
-    if ((await this.prisma.workSession.count({ where: { employeeId: id, status: 'OPEN' } })) > 0) {
-      throw Errors.conflict('للموظف حضور دون انصراف. سجّل الانصراف أولًا');
-    }
     await this.prisma.$transaction(async (tx) => {
+      await lockEmployee(tx, id);
+      if ((await tx.workSession.count({ where: { employeeId: id, status: 'OPEN' } })) > 0) {
+        throw Errors.conflict('للموظف حضور دون انصراف. سجّل الانصراف أولًا');
+      }
       await this.bumpVersion(tx, id, employee.version, { status: 'INACTIVE', terminationDate });
       await this.audit.log(
         {
@@ -424,9 +427,10 @@ export class EmployeesService {
   async changePayRate(id: string, dto: ChangePayRateDto, actor: AuthContext, meta: RequestMeta) {
     const employee = await this.findOrThrow(id);
     const effectiveFrom = dto.effectiveFrom ?? (await this.today());
-    await this.assertNotInClosedPayroll(id, effectiveFrom);
-
     await this.prisma.$transaction(async (tx) => {
+      await lockEmployee(tx, id);
+      if (dto.refreshUnpaidPeriods) await this.flagUnpaidPayrollForRefresh(tx, id, effectiveFrom, actor, meta);
+      else await this.assertNotInClosedPayroll(id, effectiveFrom, tx);
       const latest = await tx.payRate.findFirst({ where: { employeeId: id }, orderBy: { effectiveFrom: 'desc' } });
       const typeChanged = !latest || latest.payType !== dto.payType;
       // تغيّر نوع الأجر يستلزم سياسة احتساب مناسبة للنوع الجديد في التاريخ نفسه
@@ -463,12 +467,12 @@ export class EmployeesService {
   async changePayPolicy(id: string, dto: PayPolicyDto, actor: AuthContext, meta: RequestMeta) {
     const employee = await this.findOrThrow(id);
     const effectiveFrom = dto.effectiveFrom ?? (await this.today());
-    await this.assertNotInClosedPayroll(id, effectiveFrom);
-    const rate = await this.prisma.payRate.findFirst({ where: { employeeId: id, ...effectiveOn(effectiveFrom) } });
-    if (!rate) throw Errors.conflict('لا يوجد أجر سارٍ في هذا التاريخ. حدّد الأجر أولًا');
-    const policy = normalizePolicy(rate.payType, dto);
-
     await this.prisma.$transaction(async (tx) => {
+      await lockEmployee(tx, id);
+      await this.assertNotInClosedPayroll(id, effectiveFrom, tx);
+      const rate = await tx.payRate.findFirst({ where: { employeeId: id, ...effectiveOn(effectiveFrom) } });
+      if (!rate) throw Errors.conflict('لا يوجد أجر سارٍ في هذا التاريخ. حدّد الأجر أولًا');
+      const policy = normalizePolicy(rate.payType, dto);
       const latest = await tx.employeePayPolicy.findFirst({ where: { employeeId: id }, orderBy: { effectiveFrom: 'desc' } });
       await this.writeEffectiveRow(tx.employeePayPolicy, id, effectiveFrom, latest, { ...policy, createdById: actor.user.id });
       await this.bumpVersion(tx, id, employee.version, {});
@@ -524,8 +528,24 @@ export class EmployeesService {
     await delegate.create({ data: { ...data, employeeId, effectiveFrom } });
   }
 
-  private async assertNotInClosedPayroll(employeeId: string, effectiveFrom: Date): Promise<void> {
-    const closed = await this.prisma.payrollEntry.findFirst({
+  private async flagUnpaidPayrollForRefresh(tx: Prisma.TransactionClient, employeeId: string, effectiveFrom: Date,
+    actor: AuthContext, meta: RequestMeta) {
+    await tx.$queryRaw`SELECT e.id FROM payroll_entries e JOIN payroll_periods p ON p.id = e."periodId" WHERE e."employeeId" = ${employeeId}::uuid AND e."periodEnd" >= ${formatDateOnly(effectiveFrom)}::date AND p.status = 'CLOSED' ORDER BY e.id FOR UPDATE OF e`;
+    const where = { employeeId, periodEnd: { gte: effectiveFrom }, period: { status: 'CLOSED' as const } };
+    const linked = await tx.payrollEntry.findFirst({ where: { ...where, ...financiallyLinkedEntry } });
+    if (linked) throw Errors.conflict('تاريخ السريان يمس مستحقًا مرتبطًا بدفعة أو تسوية أو فرق راتب. عالج الفرق في فترة مفتوحة');
+    const affected = await tx.payrollEntry.findMany({ where, select: { id: true, snapshot: true, periodId: true } });
+    for (const entry of affected) {
+      const snapshot = entry.snapshot && typeof entry.snapshot === 'object' && !Array.isArray(entry.snapshot) ? entry.snapshot : {};
+      await tx.$queryRaw`SELECT set_config('aq.flag_payroll_entry', ${entry.id}, true)`;
+      await tx.payrollEntry.update({ where: { id: entry.id }, data: { snapshot: { ...snapshot, needsRefresh: true } } });
+      await this.audit.log({ action: 'payroll.entry.refresh_required', actor, meta, entityType: 'payroll_entry',
+        entityId: entry.id, metadata: { periodId: entry.periodId, employeeId } }, tx);
+    }
+  }
+
+  private async assertNotInClosedPayroll(employeeId: string, effectiveFrom: Date, tx: Prisma.TransactionClient): Promise<void> {
+    const closed = await tx.payrollEntry.findFirst({
       where: { employeeId, periodEnd: { gte: effectiveFrom }, period: { status: 'CLOSED' } },
       orderBy: { periodEnd: 'desc' },
       select: { periodEnd: true },

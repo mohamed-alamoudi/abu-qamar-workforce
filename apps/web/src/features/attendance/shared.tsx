@@ -27,13 +27,13 @@ export function useMutation() {
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ error?: string; success?: string }>({});
-  const run = useCallback(async (action: () => Promise<unknown>, success = 'تم الحفظ') => {
+  const run = useCallback(async <T,>(action: () => Promise<T>, success: string | ((result: T) => string) = 'تم الحفظ') => {
     setBusy(true);
     setFeedback({});
     try {
-      await action();
+      const result = await action();
       setRevision(n => n + 1);
-      setFeedback({ success });
+      setFeedback({ success: typeof success === 'function' ? success(result) : success });
       return true;
     } catch (error) {
       setFeedback({ error: errorMessage(error) });

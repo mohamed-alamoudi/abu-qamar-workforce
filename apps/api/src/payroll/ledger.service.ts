@@ -6,6 +6,7 @@ import { paginate, toSkipTake } from '../common/dto/pagination.dto';
 import { Errors } from '../common/errors/app-exception';
 import { PrismaService } from '../common/prisma/prisma.service';
 import type { AdvanceDto, DebtDto, LedgerQueryDto, PaymentDetailsDto, PaymentDto, ReversalDto, SettlementDto } from './dto/ledger.dto';
+import { needsPayrollRefresh } from './payroll-entry-state';
 
 type Tx = Prisma.TransactionClient;
 type Actor = { actor: AuthContext; meta: RequestMeta };
@@ -39,6 +40,7 @@ export class LedgerService {
     const entry = await tx.payrollEntry.findUnique({ where: { id }, include: { period: true } });
     if (!entry) throw Errors.notFound('مستحق الراتب غير موجود');
     if (entry.period.status !== 'CLOSED') throw Errors.conflict('تُصرف المستحقات بعد إغلاق فترة الرواتب');
+    if (needsPayrollRefresh(entry.snapshot)) throw Errors.conflict('تغير الأجر. حدّث المستحقات غير المصروفة في الفترة قبل تسجيل دفعة أو تسوية');
     return entry;
   }
 

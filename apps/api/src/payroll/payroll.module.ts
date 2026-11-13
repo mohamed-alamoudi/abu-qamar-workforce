@@ -5,7 +5,7 @@ import { Auth, Meta, RequirePermissions, RequireReauth } from '../common/auth/de
 import { SettingsModule } from '../settings/settings.module';
 import { AdjustmentsService } from './adjustments.service';
 import { AdvanceDto, DebtDto, LedgerQueryDto, PaymentDetailsDto, PaymentDto, ReversalDto, SettlementDto } from './dto/ledger.dto';
-import { AdjustmentsQueryDto, CreateAdjustmentDto, CreatePeriodDto, PeriodsQueryDto } from './dto/payroll.dto';
+import { AdjustmentsQueryDto, CreateAdjustmentDto, CreatePeriodDto, PeriodsQueryDto, ReopenPeriodDto } from './dto/payroll.dto';
 import { LedgerService } from './ledger.service';
 import { PayrollService } from './payroll.service';
 
@@ -39,6 +39,18 @@ class PayrollController {
   @Post('periods')
   create(@Body() dto: CreatePeriodDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
     return this.periods.create(dto, actor, meta);
+  }
+
+  @Post('periods/:id/reopen')
+  @RequireReauth()
+  reopen(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ReopenPeriodDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+    return this.periods.reopen(id, dto.reason, actor, meta);
+  }
+
+  @Post('periods/:id/refresh-unpaid')
+  @RequireReauth()
+  refreshClosed(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ReopenPeriodDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+    return this.periods.refreshClosed(id, dto.reason, actor, meta);
   }
 
   @Post('periods/:id/calculate')

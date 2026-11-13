@@ -22,10 +22,11 @@ export type Period = {
 };
 export type Entry = {
   id: string; employee: EmployeeSummary; netAmount: string; grossAmount: string; deductionsAmount: string; paidAmount: string;
+  snapshot?: { needsRefresh?: boolean } | null;
   components: { id: string; description: string; amount: string; workDate: string | null }[];
 };
 export type PeriodDetail = Period & { entries: Entry[] };
-export type Blocker = { code: string; employeeId?: string; recordId?: string; message: string };
+export type Blocker = { code: string; employeeId?: string; employeeName?: string; recordId?: string; message: string };
 export type PageResult<T> = { items: T[]; page: number; totalPages: number; total: number };
 
 export function FinanceAccess({ children }: { children: ReactNode }) {
@@ -65,9 +66,9 @@ export function financialPost<T>(path: string, body?: unknown, idempotencyKey?: 
   return api.post<T>(path, body, { idempotencyKey });
 }
 
-export function ActionForm({ title, path, idempotent = false, children, onClose, onSaved, transform }: {
+export function ActionForm<T = unknown>({ title, path, idempotent = false, children, onClose, onSaved, transform }: {
   title: string; path: string; idempotent?: boolean; children: ReactNode;
-  onClose: () => void; onSaved: () => void;
+  onClose: () => void; onSaved: (result: T) => void;
   transform?: (body: Record<string, string>) => unknown;
 }) {
   const [error, setError] = useState('');
@@ -89,8 +90,8 @@ export function ActionForm({ title, path, idempotent = false, children, onClose,
       setBusy(true);
       setError('');
       try {
-        await financialPost(path, body, attempt.current?.key);
-        onSaved();
+        const result = await financialPost<T>(path, body, attempt.current?.key);
+        onSaved(result);
         onClose();
       } catch (cause) {
         setError(errorMessage(cause));

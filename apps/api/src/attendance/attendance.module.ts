@@ -46,13 +46,20 @@ class TransitionDto extends VersionDto {
 class BreakDto extends VersionDto {
   @IsBoolean({ message: 'اختر نعم أو لا' }) isPaid: boolean;
 }
+class BulkTransitionDto {
+  @IsOptional() @IsUUID(undefined, { message: 'معرّف السجل غير صالح' }) employeeId?: string;
+  @IsOptional() @IsUUID(undefined, { message: 'معرّف السجل غير صالح' }) departmentId?: string;
+  @IsOptional() @ToDateOnly() @IsDate({ message: 'أدخل تاريخًا صالحًا بصيغة YYYY-MM-DD' }) from?: Date;
+  @IsOptional() @ToDateOnly() @IsDate({ message: 'أدخل تاريخًا صالحًا بصيغة YYYY-MM-DD' }) to?: Date;
+}
+
 class ListDto extends PaginationQueryDto {
   @IsOptional() @IsUUID(undefined, { message: 'معرّف السجل غير صالح' }) employeeId?: string;
   @IsOptional() @IsUUID(undefined, { message: 'معرّف السجل غير صالح' }) departmentId?: string;
-  @IsOptional() @IsIn(['OPEN', 'CLOSED', 'VOIDED'], { message: 'القيمة المختارة غير صالحة' }) status?: 'OPEN' | 'CLOSED' | 'VOIDED';
-  @IsOptional() @IsIn(['DRAFT', 'IN_REVIEW', 'APPROVED'], { message: 'القيمة المختارة غير صالحة' }) approvalStatus?: 'DRAFT' | 'IN_REVIEW' | 'APPROVED';
   @IsOptional() @ToDateOnly() @IsDate({ message: 'أدخل تاريخًا صالحًا بصيغة YYYY-MM-DD' }) from?: Date;
   @IsOptional() @ToDateOnly() @IsDate({ message: 'أدخل تاريخًا صالحًا بصيغة YYYY-MM-DD' }) to?: Date;
+  @IsOptional() @IsIn(['OPEN', 'CLOSED', 'VOIDED'], { message: 'القيمة المختارة غير صالحة' }) status?: 'OPEN' | 'CLOSED' | 'VOIDED';
+  @IsOptional() @IsIn(['DRAFT', 'IN_REVIEW', 'APPROVED'], { message: 'القيمة المختارة غير صالحة' }) approvalStatus?: 'DRAFT' | 'IN_REVIEW' | 'APPROVED';
 }
 
 @ApiTags('attendance')
@@ -81,7 +88,7 @@ class AttendanceController {
   @RequireAnyPermission('attendance.view', 'attendance.check_in', 'attendance.check_out')
   open(@Query() dto: PaginationQueryDto) {
     const { skip, take } = toSkipTake(dto);
-    return this.service.list({ status: 'OPEN' }, skip, take);
+    return this.service.list({ status: 'OPEN', employee: { status: 'ACTIVE' } }, skip, take);
   }
 
   @Get(':id/corrections')
@@ -111,6 +118,17 @@ class AttendanceController {
   correct(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CorrectionDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
     if (!dto.version && !dto.baseVersion) throw Errors.validation('رقم إصدار السجل مطلوب');
     return this.service.correct(id, dto, actor, meta);
+  }
+
+  @Post('bulk/review')
+  @RequirePermissions('attendance.correct')
+  bulkReview(@Body() dto: BulkTransitionDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+    return this.service.bulkTransition('review', dto, actor, meta);
+  }
+
+  @Post('bulk/approve')
+  bulkApprove(@Body() dto: BulkTransitionDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+    return this.service.bulkTransition('approve', dto, actor, meta);
   }
 
   @Post(':id/review')

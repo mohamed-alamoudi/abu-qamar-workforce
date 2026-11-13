@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDate,
   IsIn,
   IsInt,
@@ -185,6 +186,10 @@ export class SearchQueryDto {
 
 /** تغيير الأجر، مع سياسة الاحتساب عند تغيّر نوع الأجر. */
 export class ChangePayRateDto extends PayRateDto {
+  @IsOptional()
+  @IsBoolean({ message: 'اختر ما إذا كان التغيير يشمل المستحقات غير المصروفة' })
+  refreshUnpaidPeriods?: boolean;
+
   @IsOptional()
   @ValidateNested()
   @Type(() => PayPolicyDto)

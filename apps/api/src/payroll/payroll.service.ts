@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { PayrollPeriod, Prisma } from '@abu-qamar/database';
 import { ERROR_CODES } from '@abu-qamar/shared';
+import { lockEmployee } from '../attendance/attendance-common';
 import { minutesBetween } from '../attendance/attendance-math';
 import { AuditService } from '../audit/audit.service';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
@@ -13,6 +14,7 @@ import { SettingsService } from '../settings/settings.module';
 import { calculateEntry } from './calc/calculator';
 import { monthEnd, monthKey, monthStart } from './calc/iso-dates';
 import { resolvePayrollPeriod } from './calc/periods';
+import { financiallyLinkedEntry, needsPayrollRefresh } from './payroll-entry-state';
 import type { CalcComponent } from './calc/types';
 import type { CreatePeriodDto, PeriodsQueryDto } from './dto/payroll.dto';
 
@@ -67,8 +69,17 @@ export class PayrollService {
   }
 
   async create(dto: CreatePeriodDto, actor: AuthContext, meta: RequestMeta) {
-    const settings = await this.settings.getAll();
-    const bounds = resolvePayrollPeriod(dto.frequency, iso(dto.date), settings['general.weekStartsOn']);
+    let bounds;
+    if (dto.from && dto.to && !dto.date) {
+      if (dto.to < dto.from) throw Errors.validation('تاريخ النهاية يسبق تاريخ البداية');
+      if (dto.to >= addDays(dto.from, 366)) throw Errors.validation('الفترة لا تتجاوز 366 يومًا');
+      bounds = { start: iso(dto.from), end: iso(dto.to), label: iso(dto.from) + ' — ' + iso(dto.to) };
+    } else if (dto.date && !dto.from && !dto.to) {
+      const settings = await this.settings.getAll();
+      bounds = resolvePayrollPeriod(dto.frequency, iso(dto.date), settings['general.weekStartsOn']);
+    } else {
+      throw Errors.validation('حدّد تاريخ البداية والنهاية للفترة');
+    }
     return this.db.$transaction(async (tx) => {
       const row = await tx.payrollPeriod.create({ data: {
         frequency: dto.frequency, startDate: parseDateOnly(bounds.start)!, endDate: parseDateOnly(bounds.end)!,
@@ -79,7 +90,123 @@ export class PayrollService {
     });
   }
 
-  private async prepare(tx: Tx, period: PayrollPeriod, timezone: string) {
+  async reopen(id: string, reason: string, actor: AuthContext, meta: RequestMeta) {
+    if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
+    return this.db.$transaction(async tx => {
+      await lockPayroll(tx);
+      // نفس قفل الصف الذي تستخدمه الدفعات والتسويات. بعد فتح الفترة ترفض خدمة الصرف أي طلب ينتظر القفل.
+      await tx.$queryRaw`SELECT id FROM payroll_entries WHERE "periodId" = ${id}::uuid ORDER BY id FOR UPDATE`;
+      const period = await this.get(id, tx);
+      if (period.status !== 'CLOSED') throw Errors.conflict('الفترة غير مغلقة');
+      const linked = await tx.payrollEntry.findFirst({
+        where: { periodId: id, ...financiallyLinkedEntry },
+        select: { id: true },
+      });
+      if (linked) throw Errors.conflict('لا يمكن إعادة فتح فترة لها دفعة أو تسوية أو فرق راتب مرتبط. عالج الفروقات في فترة مفتوحة');
+
+      for (const entry of period.entries) {
+        await this.audit.log({ action: 'payroll.entry.archived_on_reopen', actor, meta,
+          entityType: 'payroll_entry', entityId: entry.id, before: JSON.parse(JSON.stringify(entry)),
+          metadata: { periodId: id, reason } }, tx);
+      }
+      await tx.$queryRaw`SELECT set_config('aq.reopen_period', ${id}, true)`;
+      const updated = await tx.payrollPeriod.update({ where: { id }, data: {
+        status: 'DRAFT', approvedAt: null, approvedById: null, closedAt: null, closedById: null,
+      } });
+      await tx.payrollAdjustment.updateMany({
+        where: { appliedEntry: { periodId: id }, status: 'APPLIED' },
+        data: { status: 'APPROVED', appliedEntryId: null },
+      });
+      await tx.payrollEntry.deleteMany({ where: { periodId: id } });
+      await this.audit.log({ action: 'payroll.period.reopen', actor, meta, entityType: 'payroll_period', entityId: id,
+        before: { status: period.status, closedAt: period.closedAt, closedById: period.closedById },
+        after: { status: updated.status }, metadata: { reason, archivedEntries: period.entries.length } }, tx);
+      return updated;
+    }, { timeout: 30_000 });
+  }
+
+  async refreshClosed(id: string, reason: string, actor: AuthContext, meta: RequestMeta) {
+    if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
+    const timezone = (await this.settings.getAll())['general.timezone'];
+    return this.db.$transaction(async tx => {
+      await lockPayroll(tx);
+      await this.lockCalculationInputs(tx);
+      await tx.$queryRaw`SELECT id FROM payroll_entries WHERE "periodId" = ${id}::uuid ORDER BY id FOR UPDATE`;
+      const period = await this.get(id, tx);
+      if (period.status !== 'CLOSED') throw Errors.conflict('تحديث المستحقات بهذه الطريقة متاح للفترات المغلقة فقط');
+      const locked = await tx.payrollEntry.findMany({
+        where: { periodId: id, ...financiallyLinkedEntry },
+        select: { employeeId: true },
+      });
+      const protectedEmployees = new Set(locked.map(entry => entry.employeeId));
+      const previous = new Map(period.entries.map(entry => [entry.employeeId, entry]));
+      const { calculations, blockers } = await this.prepare(tx, period, timezone, {
+        protectedEmployees, existingEmployees: new Set(previous.keys()),
+      });
+      const blocked = new Set(blockers.map(item => item.employeeId));
+      const calculated = new Set(calculations.map(item => item.employeeId));
+      for (const old of previous.values()) {
+        if (!protectedEmployees.has(old.employeeId) && needsPayrollRefresh(old.snapshot) &&
+            !calculated.has(old.employeeId) && !blocked.has(old.employeeId)) {
+          blockers.push({ code: 'REFRESH_POLICY', employeeId: old.employeeId,
+            message: 'تأكد أن دورة صرف الموظف تطابق هذه الفترة' });
+        }
+      }
+      let added = 0;
+      let updated = 0;
+      for (const { employeeId, result } of calculations) {
+        if (blocked.has(employeeId)) continue;
+        const old = previous.get(employeeId);
+        if (!old && result.components.length === 0) continue;
+        const employee = old?.employee ?? await tx.employee.findUniqueOrThrow({ where: { id: employeeId }, select: employeeSelect });
+        const amounts = { grossAmount: result.gross, deductionsAmount: result.deductions, netAmount: result.net };
+        const snapshot = JSON.parse(JSON.stringify({
+          version: 1, period: { start: iso(period.startDate), end: iso(period.endDate), frequency: period.frequency },
+          employee, ...amounts, days: result.days, components: result.components, warnings: result.warnings,
+        })) as Prisma.InputJsonValue;
+        const sameComponents = old && componentSignature(old.components) === componentSignature(result.components);
+        if (old && old.netAmount.eq(result.net) && sameComponents && !needsPayrollRefresh(old.snapshot)) continue;
+        if (old) {
+          await tx.$queryRaw`SELECT set_config('aq.refresh_payroll_entry', ${old.id}, true)`;
+          await tx.payrollEntry.update({ where: { id: old.id }, data: { ...amounts, snapshot } });
+          updated++;
+        } else {
+          added++;
+        }
+        const entry = old ?? await tx.payrollEntry.create({
+          data: { ...amounts, snapshot, employeeId, periodId: id, periodStart: period.startDate, periodEnd: period.endDate },
+        });
+        if (!sameComponents) {
+          await tx.$queryRaw`SELECT set_config('aq.refresh_payroll_entry', ${entry.id}, true)`;
+          if (old) await tx.payrollEntryComponent.deleteMany({ where: { entryId: entry.id } });
+          await tx.payrollEntryComponent.createMany({ data: result.components.map(component => ({
+            ...component, entryId: entry.id, workDate: component.workDate ? parseDateOnly(component.workDate) : null,
+          })) });
+        }
+        await this.audit.log({ action: 'payroll.entry.refresh_closed', actor, meta, entityType: 'payroll_entry', entityId: entry.id,
+          before: old ? JSON.parse(JSON.stringify(old)) : null, after: snapshot, metadata: { periodId: id, reason } }, tx);
+      }
+      const employeesWithBlockers = await tx.employee.findMany({
+        where: { id: { in: blockers.flatMap(item => item.employeeId ? [item.employeeId] : []) } },
+        select: { id: true, fullName: true },
+      });
+      const names = new Map(employeesWithBlockers.map(employee => [employee.id, employee.fullName]));
+      const result = { added, updated, protected: locked.length,
+        blockers: blockers.map(item => ({ ...item, employeeName: item.employeeId ? names.get(item.employeeId) : undefined })) };
+      await this.audit.log({ action: 'payroll.period.refresh_closed', actor, meta, entityType: 'payroll_period', entityId: id,
+        metadata: { reason, ...result } }, tx);
+      return result;
+    }, { timeout: 30_000 });
+  }
+
+  private async lockCalculationInputs(tx: Tx) {
+    const employees = await tx.employee.findMany({ select: { id: true }, orderBy: { id: 'asc' } });
+    for (const employee of employees) await lockEmployee(tx, employee.id);
+    await tx.$executeRaw`LOCK TABLE work_sessions, overtime_entries, leave_records, pay_rates, employee_pay_policies, employee_schedules, schedule_shifts, employees IN SHARE MODE`;
+  }
+
+  private async prepare(tx: Tx, period: PayrollPeriod, timezone: string,
+    refresh?: { protectedEmployees: Set<string>; existingEmployees: Set<string> }) {
     const { id, startDate, endDate, frequency } = period;
     const overlap = { effectiveFrom: { lte: endDate }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: startDate } }] };
     const dates = { gte: startDate, lte: endDate };
@@ -102,7 +229,8 @@ export class PayrollService {
         leaveRecords: { where: { startDate: { lte: endDate }, endDate: { gte: startDate }, status: { in: ['APPROVED', 'PENDING'] } }, orderBy: { id: 'asc' } },
         payrollEntries: { where: { periodId: { not: id }, periodStart: { lte: endDate }, periodEnd: { gte: startDate } } },
         adjustments: {
-          where: { OR: [{ status: 'APPROVED', appliedEntryId: null, OR: [{ targetEntryId: null }, { targetEntry: { periodEnd: { lt: startDate } } }] }, { status: 'APPLIED', appliedEntry: { periodId: id } }] },
+          where: refresh ? { status: 'APPLIED', appliedEntry: { periodId: id } }
+            : { OR: [{ status: 'APPROVED', appliedEntryId: null, OR: [{ targetEntryId: null }, { targetEntry: { periodEnd: { lt: startDate } } }] }, { status: 'APPLIED', appliedEntry: { periodId: id } }] },
           orderBy: { id: 'asc' },
         },
       },
@@ -112,6 +240,8 @@ export class PayrollService {
     const calculations = [];
     for (const employee of employees) {
       const employeeId = employee.id;
+      if (refresh?.protectedEmployees.has(employeeId)) continue;
+      if (refresh && !refresh.existingEmployees.has(employeeId) && !employee.workSessions.length && !employee.leaveRecords.length) continue;
       if (employee.terminationDate && employee.terminationDate < startDate && !employee.adjustments.length) continue;
       // التكرار يتحدد بأول سياسة سارية في الفترة، أما الأجر وطريقة حسابه فلكل يوم على حدة.
       if ((employee.payPolicies[0]?.payrollFrequency ?? 'MONTHLY') !== frequency) continue;
@@ -190,7 +320,7 @@ export class PayrollService {
       blockers.push(...result.warnings.filter((warning) => warning.blocking).map((warning) => ({ ...warning, employeeId })));
       calculations.push({ employeeId, result, adjustments: employee.adjustments });
     }
-    if (!calculations.length && !blockers.length) blockers.push({ code: 'NO_ENTRIES', message: 'لا توجد مستحقات قابلة للحساب في الفترة' });
+    if (!refresh && !calculations.length && !blockers.length) blockers.push({ code: 'NO_ENTRIES', message: 'لا توجد مستحقات قابلة للحساب في الفترة' });
     return { calculations, blockers };
   }
 
@@ -211,16 +341,7 @@ export class PayrollService {
       if (period.status === 'CLOSED' || (operation !== 'calculate' && period.status !== allowed[operation])) {
         throw Errors.conflict('حالة الفترة الحالية لا تسمح بهذا الإجراء');
       }
-      if (operation === 'close' || operation === 'approve') {
-        // نفس مفتاح قفل الموظف في الحضور. ننتظر أي كتابة سبق أن فحصت حالة الفترة.
-        const employeeIds = await tx.employee.findMany({ select: { id: true }, orderBy: { id: 'asc' } });
-        for (const employee of employeeIds) {
-          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${employee.id}, 0))::text AS locked`;
-        }
-        // يثبت المدخلات حتى تُكتب النسخة النهائية، بما فيها صفوف قد تُضاف أثناء الإغلاق.
-        await tx.$executeRaw`LOCK TABLE work_sessions, overtime_entries, leave_records, pay_rates,
-          employee_pay_policies, employee_schedules, schedule_shifts, employees IN SHARE MODE`;
-      }
+      if (operation === 'close' || operation === 'approve') await this.lockCalculationInputs(tx);
       const { blockers, calculations } = await this.prepare(tx, period, timezone);
       if (operation !== 'calculate' && operation !== 'review' && blockers.length) {
         throw new AppException(ERROR_CODES.CONFLICT, 'عالج موانع اعتماد الفترة أولًا', HttpStatus.CONFLICT, { blockers });

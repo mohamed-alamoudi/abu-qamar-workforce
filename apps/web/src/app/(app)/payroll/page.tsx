@@ -40,7 +40,10 @@ function Periods() {
       <Select label="تكرار الصرف" name="frequency" defaultValue="MONTHLY">
         {Object.entries(frequencies).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
       </Select>
-      <Input label="تاريخ داخل الفترة المطلوبة" name="date" type="date" required />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Input label="من تاريخ" name="from" type="date" required />
+        <Input label="إلى تاريخ" name="to" type="date" required />
+      </div>
     </ActionForm>}
   </>;
 }

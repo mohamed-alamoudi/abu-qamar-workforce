@@ -48,6 +48,8 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     };
   }, [user?.id, refresh]);
   const [selected, setSelected] = useState('');
+  const [staffSearch, setStaffSearch] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
   const [department, setDepartment] = useState('');
   const [filter, setFilter] = useState({ employeeId: '', departmentId: '', from: '', to: '', status: '', approvalStatus: '' });
   const [page, setPage] = useState(1);
@@ -63,6 +65,10 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     before: Pick<Session, 'checkInAt' | 'checkOutAt'>; after: Pick<Session, 'checkInAt' | 'checkOutAt'> }[]>(
     dialog?.kind === 'history' ? '/attendance/' + dialog.row?.id + '/corrections' : null);
   const employees = staff.data ?? [];
+  const matches = (row: Employee, query: string) => (row.fullName + ' ' + row.code).toLowerCase().includes(query.trim().toLowerCase());
+  const activeEmployees = employees.filter(row => row.status === 'ACTIVE');
+  const activeSelection = activeEmployees.some(row => row.id === selected) ? selected : '';
+  const availableOpenShifts = open.data?.items.filter(row => row.employee.status === 'ACTIVE') ?? [];
   const availableDepartments = departments.data ?? [];
   const pending = queue.filter(item => ['LOCAL', 'PENDING', 'SENDING'].includes(item.state));
   const queuedOpen = pending.find(({ operation }) => operation.employeeId === selected &&
@@ -73,7 +79,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     if (!user) return Promise.resolve(false);
     return run(() => enqueueAttendance(user.id, operation), 'محفوظ محليًا · بانتظار تأكيد الخادم');
   }
-  const chosenOpen = open.data?.items.find(row => row.employeeId === selected);
+  const chosenOpen = availableOpenShifts.find(row => row.employeeId === activeSelection);
   const changeFilter = (key: keyof typeof filter, value: string) => {
     setFilter(current => ({ ...current, [key]: value }));
     setPage(1);
@@ -86,6 +92,18 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   }
   function action(row: Session, path: string, extra: object = {}) {
     return run(() => api.post('/attendance/' + row.id + '/' + path, { version: row.version, ...extra }));
+  }
+  function bulkTransition(action: 'review' | 'approve') {
+    const { departmentId, from, to } = filter;
+    return run(() => api.post<{ updated: number; skipped: number }>('/attendance/bulk/' + action, {
+      employeeId: employeeId || filter.employeeId || undefined,
+      departmentId: departmentId || undefined, from: from || undefined, to: to || undefined,
+    }), ({ updated, skipped }) => {
+      if (!updated && !skipped) return 'لا توجد سجلات مؤهلة لهذا الإجراء في النطاق المحدد.';
+      const label = action === 'review' ? 'أُرسلت للمراجعة' : 'اعتُمدت';
+      return label + ' · عدد السجلات: ' + updated +
+        (skipped ? ' · تعذّر تغيير ' + skipped + ' سجل. راجع حالة السجلات أو فترة الرواتب.' : '');
+    });
   }
   function checkout(row: Session) {
     if (!navigator.onLine) return storeOffline({
@@ -102,23 +120,25 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     {quick && <section id="quick-check-in"><Card className="space-y-4 p-4">
       <h2 className="text-lg font-semibold">التسجيل السريع</h2>
       {(checkIn || correct) && <div className="grid gap-3 sm:grid-cols-2">
-        <EmployeeSelect employees={checkIn && !correct ? employees.filter(row => row.status === 'ACTIVE') : employees} value={selected} onChange={setSelected} required />
+        <Input label="بحث عن موظف بالاسم أو الكود" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} />
+        <EmployeeSelect employees={activeEmployees.filter(row => row.id === activeSelection || matches(row, staffSearch))}
+          value={activeSelection} onChange={setSelected} required />
         <DepartmentSelect departments={availableDepartments.filter(row => row.isActive)} value={department} onChange={setDepartment} />
       </div>}
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        {checkIn && <Button className="min-h-14" disabled={!selected || Boolean(chosenOpen || queuedOpen)} loading={busy}
+        {checkIn && <Button className="min-h-14" disabled={!activeSelection || Boolean(chosenOpen || queuedOpen)} loading={busy}
           onClick={() => void (navigator.onLine
             ? run(() => api.post('/attendance/check-in', { employeeId: selected, departmentId: department || undefined }), 'تم تسجيل الحضور')
             : storeOffline({ action: 'CHECK_IN', employeeId: selected, departmentId: department || undefined, checkInAt: new Date().toISOString() }))}>
           <LogIn size={20} /> تسجيل الحضور
         </Button>}
-        {checkOut && queuedOpen && <Button className="min-h-14" variant="secondary" loading={busy}
+        {checkOut && activeSelection && queuedOpen && <Button className="min-h-14" variant="secondary" loading={busy}
           onClick={() => void storeOffline({ action: 'CHECK_OUT', sessionId: queuedOpen.operation.operationId,
             baseVersion: 1, checkOutAt: new Date().toISOString() })}><LogOut size={20} /> تسجيل الانصراف للوردية المحلية</Button>}
         {checkOut && chosenOpen && <Button disabled={pendingCheckout(chosenOpen.id)} className="min-h-14" variant="secondary" loading={busy} onClick={() => void checkout(chosenOpen)}>
           <LogOut size={20} /> تسجيل الانصراف
         </Button>}
-        {correct && <Button variant="secondary" className="min-h-14" disabled={!selected} onClick={() => showDialog('manual')}>إدخال يدوي</Button>}
+        {correct && <Button variant="secondary" className="min-h-14" disabled={!activeSelection} onClick={() => showDialog('manual')}>إدخال يدوي</Button>}
       </div>
       {(view || admin) && <div className="flex flex-wrap gap-4 text-sm">
         {view && <Link className="underline" href="/attendance/schedules">جداول العمل</Link>}
@@ -129,8 +149,8 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
       <h2 className="text-lg font-semibold">الورديات المفتوحة</h2>
       <Feedback error={open.error} />
       {open.loading && <p role="status">جارٍ تحميل الورديات المفتوحة…</p>}
-      {open.data?.items.length === 0 && <p className="text-muted">لا توجد ورديات مفتوحة.</p>}
-      {open.data?.items.map(row => {
+      {open.data && availableOpenShifts.length === 0 && <p className="text-muted">لا توجد ورديات مفتوحة.</p>}
+      {availableOpenShifts.map(row => {
         const activeBreak = row.breaks.find(item => !item.endAt);
         return <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line p-3">
           <div><p className="font-semibold">{row.employee.fullName} · {row.department.name}</p>
@@ -154,7 +174,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-lg font-semibold">سجلات الدوام</h2>
         <Button variant="secondary" onClick={() => {
-          setFilter({ employeeId: '', departmentId: '', from: '', to: '', status: 'CLOSED', approvalStatus: 'IN_REVIEW' });
+          setFilter(current => ({ ...current, status: 'CLOSED', approvalStatus: 'IN_REVIEW' }));
           setPage(1);
         }}>قائمة المراجعة</Button>
         <Button variant="ghost" onClick={() => {
@@ -162,7 +182,11 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
         }}>مسح الفلاتر</Button>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {!employeeId && <EmployeeSelect employees={employees} value={filter.employeeId} onChange={id => changeFilter('employeeId', id)} />}
+        {!employeeId && <>
+          <Input label="بحث بالاسم أو الكود في الموظفين" value={historySearch} onChange={e => setHistorySearch(e.target.value)} />
+          <EmployeeSelect employees={employees.filter(row => row.id === filter.employeeId || matches(row, historySearch))}
+            value={filter.employeeId} onChange={id => changeFilter('employeeId', id)} />
+        </>}
         {quick && <Select label="القسم" value={filter.departmentId} onChange={e => changeFilter('departmentId', e.target.value)}>
           <option value="">جميع الأقسام</option>
           {availableDepartments.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
@@ -177,6 +201,15 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
           {Object.entries(reviewLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </Select>
       </div>
+      {(correct || admin) && <div className="space-y-2 border-t border-line pt-3">
+        <div className="flex flex-wrap gap-2">
+          {correct && <Button variant="secondary" disabled={busy} onClick={() => void bulkTransition('review')}>
+            إرسال الكل للمراجعة
+          </Button>}
+          {admin && <Button disabled={busy} onClick={() => void bulkTransition('approve')}>اعتماد الكل</Button>}
+        </div>
+        <p className="text-sm text-muted">يشمل الإجراء الورديات المغلقة المؤهلة عبر كل الصفحات حسب الموظف والقسم والتواريخ المحددة.</p>
+      </div>}
       <Feedback error={list.error} />
       {list.loading && <p role="status">جارٍ تحميل السجلات…</p>}
       {list.data?.items.length === 0 && <p className="text-muted">لا توجد سجلات مطابقة.</p>}

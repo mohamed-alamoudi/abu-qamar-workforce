@@ -315,6 +315,7 @@ function FinanceTab({ employee, currency, onChanged }: { employee: Employee; cur
   const [history, setHistory] = useState<PayHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<'rate' | 'policy' | null>(null);
+  const [refreshUnpaidPeriods, setRefreshUnpaidPeriods] = useState(false);
   const [form, setForm] = useState<PayFormState>(EMPTY_PAY_FORM);
 
   const load = useCallback(() => {
@@ -339,6 +340,7 @@ function FinanceTab({ employee, currency, onChanged }: { employee: Employee; cur
 
   const currentPolicy = history?.policies.find((p) => p.effectiveTo === null) ?? null;
   const openModal = (which: 'rate' | 'policy') => {
+    setRefreshUnpaidPeriods(false);
     setForm({
       ...EMPTY_PAY_FORM,
       payType: employee.currentPay?.payType ?? 'HOURLY',
@@ -448,13 +450,18 @@ function FinanceTab({ employee, currency, onChanged }: { employee: Employee; cur
             (policy.referenceDailyHours ?? null) === currentPolicy.referenceDailyHours &&
             (policy.absenceDeductionMethod ?? null) === currentPolicy.absenceDeductionMethod &&
             (policy.fixedMonthDays ?? null) === currentPolicy.fixedMonthDays;
-          applied(await api.post<PayHistory>(`/employees/${employee.id}/pay-rates`, same ? built.pay : { ...built.pay, policy }));
+          applied(await api.post<PayHistory>(`/employees/${employee.id}/pay-rates`, { ...built.pay, ...(same ? {} : { policy }), refreshUnpaidPeriods }));
         }}
       >
         <Alert tone="brand">
-          الأجر الجديد يسري من تاريخه فقط، والفترة السابقة تُغلق في اليوم الذي قبله. الرواتب المغلقة لا تتغير.
+          الأجر الجديد يسري من تاريخه. إذا غطّى مستحقًا مغلقًا غير مصروف، يمكنك طلب تحديثه بعد الحفظ.
         </Alert>
         <PayFields value={form} onChange={setForm} currency={currency} />
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={refreshUnpaidPeriods} onChange={e => setRefreshUnpaidPeriods(e.target.checked)} />
+          تطبيق الأجر على المستحقات غير المصروفة في الفترات المغلقة
+        </label>
+        {refreshUnpaidPeriods && <p className="text-sm text-muted">بعد الحفظ افتح فترة الرواتب واضغط «تحديث المستحقات غير المصروفة» قبل الصرف.</p>}
       </ActionModal>
 
       <ActionModal

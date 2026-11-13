@@ -15,10 +15,29 @@ export class CreatePeriodDto {
   @IsIn(PAYROLL_FREQUENCIES, { message: 'القيمة المختارة غير صالحة' })
   frequency: (typeof PAYROLL_FREQUENCIES)[number];
 
-  /** أي تاريخ داخل الفترة المطلوبة؛ الخادم يشتق حدودها (الأسبوع من يوم بدايته، نصف الشهر، الشهر) */
+  /** التوافق مع الطلبات السابقة التي تختار تاريخًا داخل دورة التقويم. */
+  @IsOptional()
   @ToDateOnly()
   @IsDate({ message: DATE_MESSAGE })
-  date: Date;
+  date?: Date;
+
+  @IsOptional()
+  @ToDateOnly()
+  @IsDate({ message: DATE_MESSAGE })
+  from?: Date;
+
+  @IsOptional()
+  @ToDateOnly()
+  @IsDate({ message: DATE_MESSAGE })
+  to?: Date;
+}
+
+export class ReopenPeriodDto {
+  @Transform(trim)
+  @IsString({ message: 'أدخل سبب إعادة الفتح' })
+  @MinLength(2, { message: 'اكتب سببًا من حرفين على الأقل' })
+  @MaxLength(255, { message: 'السبب لا يتجاوز 255 حرفًا' })
+  reason: string;
 }
 
 export class PeriodsQueryDto extends PaginationQueryDto {

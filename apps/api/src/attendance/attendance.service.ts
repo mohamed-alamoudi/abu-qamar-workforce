@@ -4,7 +4,7 @@ import { can, type PermissionKey } from '@abu-qamar/shared';
 import { DateTime } from 'luxon';
 import { AuditService } from '../audit/audit.service';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
-import { Errors } from '../common/errors/app-exception';
+import { AppException, Errors } from '../common/errors/app-exception';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { addDays, formatDateOnly } from '../common/utils/dates';
 import { MaintenanceService } from '../maintenance/maintenance.module';
@@ -23,7 +23,7 @@ export interface ManualInput extends OperationOptions { employeeId: string; depa
 export interface CorrectionInput extends OperationOptions { version?: number; checkInAt?: TimeInput; checkOutAt?: TimeInput; departmentId?: string; reason: string }
 type Operation = 'check-in' | 'check-out' | 'manual' | 'correct';
 const include = {
-  employee: { select: { id: true, fullName: true, code: true } },
+  employee: { select: { id: true, fullName: true, code: true, status: true } },
   department: { select: { id: true, name: true } },
   breaks: { orderBy: { startAt: 'asc' } },
 } satisfies Prisma.WorkSessionInclude;
@@ -141,7 +141,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       const checkInAt = resolveInstant(input.checkInAt, zone, 'وقت الحضور');
       const checkOutAt = input.checkOutAt ? resolveInstant(input.checkOutAt, zone, 'وقت الانصراف') : null;
       const workDate = localDateOf(checkInAt, zone);
-      if ((kind === 'check-in' && employee.status !== 'ACTIVE') || (employee.terminationDate && workDate > employee.terminationDate)) {
+      if (employee.status !== 'ACTIVE' || (employee.terminationDate && workDate > employee.terminationDate)) {
         throw Errors.conflict('الموظف متوقف في تاريخ الوردية');
       }
       const departmentId = input.departmentId ?? employee.departmentId;
@@ -166,6 +166,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       await lockEmployee(tx, input.employeeId);
       const row = await tx.workSession.findFirst({ where: { id: input.sessionId, employeeId: input.employeeId, status: 'OPEN' }, include });
       if (!row) throw Errors.conflict('لا توجد وردية مفتوحة لهذا الموظف');
+      if (row.employee.status !== 'ACTIVE') throw Errors.conflict('الموظف متوقف. لا يمكن تسجيل الانصراف');
       this.assertVersion(row, input.baseVersion);
       await assertOpenPayroll(tx, row.employeeId, row.workDate);
       const zone = await this.timezone();
@@ -192,6 +193,10 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       const checkInAt = input.checkInAt ? resolveInstant(input.checkInAt, zone, 'وقت الحضور') : row.checkInAt;
       const checkOutAt = input.checkOutAt ? resolveInstant(input.checkOutAt, zone, 'وقت الانصراف') : row.checkOutAt;
       const workDate = input.checkInAt ? localDateOf(checkInAt, zone) : row.workDate;
+      if (row.employee.status === 'INACTIVE') {
+        const { terminationDate } = await tx.employee.findUniqueOrThrow({ where: { id: row.employeeId }, select: { terminationDate: true } });
+        if (terminationDate && workDate > terminationDate) throw Errors.conflict('لا يمكن نقل الوردية إلى ما بعد تاريخ إيقاف الموظف');
+      }
       await assertOpenPayroll(tx, row.employeeId, workDate);
       const departmentId = input.departmentId ?? row.departmentId;
       if (+checkInAt === +row.checkInAt && checkOutAt?.getTime() === row.checkOutAt?.getTime() && departmentId === row.departmentId) {
@@ -216,6 +221,35 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       await this.log(tx, 'correct', actor, meta, after, row);
       return after;
     }, transaction);
+  }
+
+  async bulkTransition(action: 'review' | 'approve',
+    scope: { employeeId?: string; departmentId?: string; from?: Date; to?: Date }, actor: AuthContext, meta: RequestMeta) {
+    if (action === 'review') this.authorize(actor, 'attendance.correct');
+    else if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
+    if (scope.from && scope.to && scope.from > scope.to) throw Errors.validation('تاريخ النهاية يسبق البداية');
+
+    const candidates = await this.db.workSession.findMany({
+      where: {
+        employeeId: scope.employeeId, departmentId: scope.departmentId,
+        workDate: { gte: scope.from, lte: scope.to },
+        status: 'CLOSED', checkOutAt: { not: null },
+        approvalStatus: action === 'review' ? 'DRAFT' : 'IN_REVIEW',
+      },
+      select: { id: true, version: true },
+    });
+    let updated = 0;
+    let skipped = 0;
+    for (const candidate of candidates) {
+      try {
+        await this.transition(candidate.id, action, candidate.version, actor, meta);
+        updated++;
+      } catch (error) {
+        if (!(error instanceof AppException) || ![404, 409].includes(error.getStatus())) throw error;
+        skipped++;
+      }
+    }
+    return { updated, skipped };
   }
 
   async transition(id: string, action: 'review' | 'approve' | 'void', version: number, actor: AuthContext, meta: RequestMeta, reason?: string) {

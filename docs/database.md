@@ -64,7 +64,7 @@ pnpm db:seed       # مزامنة البيانات المرجعية (الصلا�
 |---|---|
 | `audit_logs`, `debt_movements`, `settlement_allocations`, `attendance_corrections` | إضافة فقط |
 | `financial_transactions` | إضافة، وتغيير الحالة `POSTED → REVERSED` فقط. لا حذف ولا تعديل |
-| `payroll_periods` المغلقة | لا تعديل ولا حذف ولا إعادة فتح |
+| `payroll_periods` المغلقة | تُحمى من التعديل والحذف. يسمح الخادم بفتحها إلى مسودة بعد إعادة التحقق إذا لم ترتبط بحركة مالية أو فرق راتب، مع حفظ الحساب السابق في التدقيق |
 | `payroll_entries` في فترة مغلقة | تغيير `paidAmount` فقط (تسجيل الدفعات) |
 | `payroll_entry_components` في فترة مغلقة | لا إضافة ولا تعديل ولا حذف |
 

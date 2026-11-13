@@ -59,6 +59,111 @@ describe('محرك الرواتب والحسابات المالية', () => {
     return (await admin.post(`/payroll/periods/${id}/close`).expect(201)).body.entries[0];
   }
 
+  it('يحدث فترة مغلقة جزئيًا دون المساس بدفعة عامل ويضيف عاملًا جديدًا بعد اعتماد دوامه', async () => {
+    await rate('HOURLY', '30');
+    await policy();
+    await shift('2026-10-05', 120);
+    const createHourly = async (fullName: string) => (await admin.post('/employees', {
+      fullName, departmentId, pay: { payType: 'HOURLY', amount: 30, effectiveFrom: '2026-10-01' },
+    }).expect(201)).body.id;
+    const record = async (id: string) => (await admin.post('/attendance/manual', {
+      employeeId: id, checkInAt: '2026-10-06T08:00:00Z', checkOutAt: '2026-10-06T09:00:00Z',
+    }).expect(201)).body;
+    const approveShift = async (row: { id: string; version: number }) => {
+      await admin.post('/attendance/' + row.id + '/review', { version: row.version }).expect(201);
+      await admin.post('/attendance/' + row.id + '/approve', { version: row.version + 1 }).expect(201);
+    };
+    const paidEmployee = await createHourly('عامل قبض');
+    await approveShift(await record(paidEmployee));
+    const { id } = await period();
+    await calc(id);
+    await close(id);
+    const existing = await ctx.prisma.payrollEntry.findMany({ where: { periodId: id } });
+    const paid = existing.find(entry => entry.employeeId === paidEmployee)!;
+    const unpaid = existing.find(entry => entry.employeeId === employeeId)!;
+    const payment = (entryId: string) => admin.post('/payments', {
+      payrollEntryId: entryId, amount: '20', method: 'CASH', receivedBy: 'الموظف', reference: 'إيصال',
+    }).set('Idempotency-Key', randomUUID());
+    await payment(paid.id).expect(201);
+    const paidBefore = await ctx.prisma.payrollEntry.findUniqueOrThrow({ where: { id: paid.id } });
+    const corrected = { payType: 'HOURLY', amount: 45, effectiveFrom: '2026-10-01', refreshUnpaidPeriods: true };
+    await admin.post('/employees/' + paidEmployee + '/pay-rates', corrected).expect(409);
+    await admin.post('/employees/' + employeeId + '/pay-rates', corrected).expect(200);
+    await payment(unpaid.id).expect(409);
+
+    const addedEmployee = await createHourly('عامل جديد');
+    const pending = await record(addedEmployee);
+    const path = '/payroll/periods/' + id + '/refresh-unpaid';
+    const request = { reason: 'تحديث أجر وضم عامل جديد' };
+    const supervisor = await createSupervisor(ctx, admin, ['finance.view']);
+    await supervisor.client.post(path, request).expect(403);
+    await ctx.prisma.session.updateMany({ where: { userId: adminId }, data: { reauthAt: null } });
+    expect((await admin.post(path, request).expect(403)).body.code).toBe('REAUTH_REQUIRED');
+    await reauth();
+    const partial = await admin.post(path, request).expect(201);
+    expect(partial.body).toMatchObject({ added: 0, updated: 1, protected: 1,
+      blockers: [expect.objectContaining({ code: 'ATTENDANCE_PENDING', employeeName: 'عامل جديد' })] });
+    const updated = await ctx.prisma.payrollEntry.findUniqueOrThrow({ where: { id: unpaid.id } });
+    expect(updated.netAmount.toFixed(2)).toBe('90.00');
+    expect(updated.snapshot).not.toHaveProperty('needsRefresh');
+    expect(await ctx.prisma.auditLog.count({ where: { action: 'payroll.entry.refresh_closed', entityId: unpaid.id } })).toBe(1);
+    await approveShift(pending);
+    const finished = await admin.post(path, request).expect(201);
+    expect(finished.body).toMatchObject({ added: 1, updated: 0, protected: 1, blockers: [] });
+    const added = await ctx.prisma.payrollEntry.findUniqueOrThrow({ where: { periodId_employeeId: { periodId: id, employeeId: addedEmployee } } });
+    expect(added.netAmount.toFixed(2)).toBe('30.00');
+    expect(await ctx.prisma.payrollEntry.findUniqueOrThrow({ where: { id: paid.id } })).toEqual(paidBefore);
+    expect((await admin.get('/payroll/periods/' + id).expect(200)).body.status).toBe('CLOSED');
+    expect(await ctx.prisma.financialTransaction.count()).toBe(1);
+    await admin.post(path, request).expect(201, { added: 0, updated: 0, protected: 1, blockers: [] });
+    await payment(unpaid.id).expect(201);
+  });
+
+  it('يعيد فتح فترة مخصصة قبل الصرف لإضافة موظف وتصحيح الأجر ثم يمنع فتحها بعد الدفع', async () => {
+    await rate('HOURLY', '30');
+    await policy();
+    await shift('2026-10-05', 120);
+    await admin.post('/payroll/periods', { frequency: 'MONTHLY', from: '2026-10-10', to: '2026-10-04' }).expect(400);
+    const bounds = { frequency: 'MONTHLY', from: '2026-10-04', to: '2026-10-10' };
+    const { body: original } = await admin.post('/payroll/periods', bounds).expect(201);
+    expect(original.startDate.slice(0, 10)).toBe(bounds.from);
+    expect(original.endDate.slice(0, 10)).toBe(bounds.to);
+    await calc(original.id);
+    const previous = await close(original.id);
+    expect(amount(previous.netAmount)).toBe('60.00');
+    const supervisor = await createSupervisor(ctx, admin, ['finance.view']);
+    const reopen = '/payroll/periods/' + original.id + '/reopen';
+    const reason = { reason: 'تصحيح الأجر وإضافة وردية موظف' };
+    await supervisor.client.post(reopen, reason).expect(403);
+    await ctx.prisma.session.updateMany({ where: { userId: adminId }, data: { reauthAt: null } });
+    const denied = await admin.post(reopen, reason).expect(403);
+    expect(denied.body.code).toBe('REAUTH_REQUIRED');
+    await reauth();
+    await admin.post(reopen, reason).expect(201);
+    const archive = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'payroll.entry.archived_on_reopen', entityId: previous.id },
+    });
+    expect(archive.before).toMatchObject({ netAmount: '60', snapshot: { version: 1 } });
+    const corrected = { payType: 'HOURLY', amount: 45, effectiveFrom: '2026-10-01' };
+    await admin.post('/employees/' + employeeId + '/pay-rates', corrected).expect(200);
+    const { body: added } = await admin.post('/employees', {
+      fullName: 'موظف أضيف بعد الإغلاق', departmentId, pay: corrected,
+    }).expect(201);
+    const { body: manual } = await admin.post('/attendance/manual', {
+      employeeId: added.id, checkInAt: '2026-10-06T08:00:00Z', checkOutAt: '2026-10-06T09:00:00Z',
+    }).expect(201);
+    await admin.post('/attendance/' + manual.id + '/review', { version: manual.version }).expect(201);
+    await admin.post('/attendance/' + manual.id + '/approve', { version: manual.version + 1 }).expect(201);
+    const recalculated = await calc(original.id);
+    expect(recalculated.entries.map((row: { netAmount: string }) => amount(row.netAmount)).sort()).toEqual(['45.00', '90.00']);
+    const entry = await close(original.id);
+    await admin.post('/payments', {
+      payrollEntryId: entry.id, amount: '20', method: 'CASH', receivedBy: 'الموظف', reference: 'إيصال',
+    }).set('Idempotency-Key', randomUUID()).expect(201);
+    await admin.post(reopen, reason).expect(409);
+    expect((await admin.get('/payroll/periods/' + original.id).expect(200)).body.status).toBe('CLOSED');
+  });
+
   it('يربط الدوام المعتمد بالراتب والتقرير ويحجب التصحيح المتأخر عند المزامنة', async () => {
     await rate('HOURLY', '30');
     await policy();
@@ -78,6 +183,10 @@ describe('محرك الرواتب والحسابات المالية', () => {
 
     const report = await admin.get('/reports/financial?view=entries&from=2026-10-01&to=2026-10-31&employeeId=' + employeeId).expect(200);
     expect(report.body.items).toEqual([expect.objectContaining({ netAmount: '60.00', paidAmount: '20.00', unpaidAmount: '40.00' })]);
+    const balance = (await admin.get('/employees/' + employeeId + '/financial-balances').expect(200)).body;
+    expect(amount(balance.net)).toBe('60.00');
+    expect(amount(balance.paid)).toBe('20.00');
+    expect(amount(balance.outstanding)).toBe('40.00');
     const sync = await admin.post('/sync/attendance', { userId: adminId, operations: [{
       action: 'CORRECTION', sessionId: row.id, baseVersion: row.version + 2,
       operationId: randomUUID(), deviceId: randomUUID(), createdAt: new Date().toISOString(),

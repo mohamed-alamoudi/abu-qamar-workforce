@@ -24,6 +24,51 @@ describe('الحضور والانصراف', () => {
   const manual = (checkInAt: string, checkOutAt?: string, extra: object = {}) =>
     admin.post('/attendance/manual', { employeeId, checkInAt, checkOutAt, ...extra });
 
+  it('يرسل ويعتمد كل الورديات المؤهلة في النطاق عبر أكثر من صفحة', async () => {
+    const first = await manual('2026-03-01T08:00', '2026-03-01T09:00').expect(201);
+    const original = await ctx.prisma.workSession.findUniqueOrThrow({ where: { id: first.body.id } });
+    await ctx.prisma.workSession.createMany({
+      data: Array.from({ length: 20 }, (_, i) => {
+        const day = String(i + 2).padStart(2, '0');
+        const start = new Date('2026-03-' + day + 'T06:00:00Z');
+        const end = new Date(+start + 3_600_000);
+        return {
+          employeeId, departmentId: original.departmentId, createdById: adminId,
+          workDate: new Date('2026-03-' + day), checkInAt: start, checkOutAt: end,
+          originalCheckInAt: start, originalCheckOutAt: end, status: 'CLOSED', workedMinutes: 60,
+        };
+      }),
+    });
+    const excluded = await manual('2026-03-22T08:00', '2026-03-22T09:00', { departmentId: otherDepartment }).expect(201);
+    const open = await manual('2026-03-23T08:00').expect(201);
+    const supervisor = await createSupervisor(ctx, admin, ['attendance.correct']);
+    const viewer = await createSupervisor(ctx, admin, ['attendance.view'], { username: 'bulk_viewer' });
+    const scope = { departmentId: original.departmentId, from: '2026-03-01', to: '2026-03-23' };
+    await viewer.client.post('/attendance/bulk/review', scope).expect(403);
+    await admin.post('/attendance/bulk/review', { from: '2026-03-23', to: '2026-03-01' }).expect(400);
+    await admin.post('/attendance/bulk/approve', scope).expect(201, { updated: 0, skipped: 0 });
+    await supervisor.client.post('/attendance/bulk/review', scope).expect(201, { updated: 21, skipped: 0 });
+    await supervisor.client.post('/attendance/bulk/approve', scope).expect(403);
+    await admin.post('/attendance/bulk/approve', scope).expect(201, { updated: 21, skipped: 0 });
+    await admin.post('/attendance/bulk/approve', scope).expect(201, { updated: 0, skipped: 0 });
+    expect(await ctx.prisma.workSession.count({ where: { approvalStatus: 'APPROVED', version: 3 } })).toBe(21);
+    expect(await ctx.prisma.attendanceApproval.count()).toBe(42);
+    expect(await ctx.prisma.workSession.count({
+      where: { id: { in: [excluded.body.id, open.body.id] }, approvalStatus: 'DRAFT' },
+    })).toBe(2);
+  });
+
+  it('يمنع إضافة وردية جديدة للموظف الموقوف ويحفظ سجله السابق', async () => {
+    const old = await manual('2026-03-01T08:00', '2026-03-01T09:00').expect(201);
+    await admin.post('/employees/' + employeeId + '/deactivate', { terminationDate: '2026-03-02' }).expect(200);
+    await admin.post('/attendance/check-in', { employeeId }).expect(409);
+    await manual('2026-03-02T08:00', '2026-03-02T09:00').expect(409);
+    await manual('2026-03-01T10:00').expect(409);
+    expect(await ctx.prisma.workSession.count({ where: { employeeId } })).toBe(1);
+    const history = await admin.get('/attendance?employeeId=' + employeeId).expect(200);
+    expect(history.body.items[0]).toMatchObject({ id: old.body.id });
+  });
+
   it('يسجل حضورًا وانصرافًا سريعين ويمنع حضورين متزامنين', async () => {
     const results = await Promise.all([admin.post('/attendance/check-in', { employeeId, departmentId: otherDepartment }),
       admin.post('/attendance/check-in', { employeeId, departmentId: otherDepartment })]);
@@ -174,6 +219,8 @@ describe('الحضور والانصراف', () => {
     const changed = await admin.patch(`/attendance/${row.body.id}`, { version: 1, checkInAt: '2026-04-01T08:00', reason: 'تصحيح' });
     expect(changed.status).toBe(409);
     expect(changed.body.message).toContain('مغلقة');
+    await admin.post('/attendance/bulk/review', { employeeId }).expect(201, { updated: 0, skipped: 1 });
+    expect(await ctx.prisma.attendanceApproval.count()).toBe(0);
     expect((await admin.post(`/attendance/${row.body.id}/void`, { version: 1, reason: 'إلغاء' })).status).toBe(409);
   });
 });
