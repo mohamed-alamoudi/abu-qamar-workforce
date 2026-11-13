@@ -114,10 +114,10 @@ export class SchedulesService {
 
   /**
    * ورديات ملزِمة انتهى وقتها دون أي حضور ودون إجازة مسجلة.
-   * لا يُنشأ غياب تلقائيًا: هذه قائمة للمراجعة، والأدمن يقرر تسجيل غياب أو إجازة.
+   * هذه القائمة ترصد الورديات المنتهية التي تحتاج مراجعة.
    * الموظف المرن لا يظهر هنا إلا إن كانت له وردية مؤرخة صريحة.
    */
-  async missed(from: Date, to: Date, employeeId?: string) {
+  async missed(from: Date, to: Date, employeeId?: string, now = new Date()) {
     this.assertRange(from, to);
     const timezone = await this.timezone();
     const employees = await this.prisma.employee.findMany({
@@ -129,7 +129,6 @@ export class SchedulesService {
     const plannedByEmployee = await this.plannedFor(ids, from, to, timezone);
     if (plannedByEmployee.size === 0) return [];
 
-    const now = new Date();
     const [sessions, leaves] = await Promise.all([
       this.prisma.workSession.findMany({
         where: { employeeId: { in: [...plannedByEmployee.keys()] }, status: { not: 'VOIDED' }, checkInAt: { gte: addDays(from, -2), lt: addDays(to, 3) } },

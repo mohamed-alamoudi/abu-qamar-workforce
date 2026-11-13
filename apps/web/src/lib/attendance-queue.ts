@@ -100,18 +100,19 @@ export async function flushAttendance(userId: string): Promise<void> {
   await lock(userId, async () => {
     if (retiringUsers.has(userId)) return;
     const items = (await readQueue(userId))
-      .filter(({ state, retryAt }) => ['LOCAL', 'PENDING', 'SENDING'].includes(state) && retryAt <= Date.now())
-      .sort((a, b) => a.operation.createdAt.localeCompare(b.operation.createdAt))
-      .slice(0, 25);
-    if (!items.length) return;
-    for (const item of items) await write(userId, { ...item, state: 'SENDING' });
+      .filter(({ state }) => ['LOCAL', 'PENDING', 'SENDING'].includes(state))
+      .sort((a, b) => a.operation.createdAt.localeCompare(b.operation.createdAt));
+    const waiting = items.findIndex(item => item.retryAt > Date.now());
+    const batch = items.slice(0, waiting < 0 ? 25 : Math.min(25, waiting));
+    if (!batch.length) return;
+    for (const item of batch) await write(userId, { ...item, state: 'SENDING' });
 
     try {
       const { results } = await api.post<{ results: Result[] }>('/sync/attendance', {
         userId,
-        operations: items.map(({ operation }) => operation),
+        operations: batch.map(({ operation }) => operation),
       });
-      for (const item of items) {
+      for (const item of batch) {
         const result = results.find(({ operationId }) => operationId === item.operation.operationId);
         if (!result) {
           await write(userId, { ...item, state: 'PENDING', retryAt: Date.now() + retryDelay(item.attempts + 1), attempts: item.attempts + 1 });
@@ -124,7 +125,7 @@ export async function flushAttendance(userId: string): Promise<void> {
     } catch (error) {
       if (retiringUsers.has(userId)) return;
       const retry = !(error instanceof ApiError) || [0, 401, 429].includes(error.status) || error.status >= 500;
-      for (const item of items) {
+      for (const item of batch) {
         await write(userId, {
           ...item,
           state: retry ? 'PENDING' : 'FAILED',

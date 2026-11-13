@@ -64,16 +64,24 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
   const select = quick.getByLabel('الموظف', { exact: true });
   const option = select.getByRole('option', { name: new RegExp(employee) });
   await expect(option).toHaveCount(1);
-  await select.selectOption(await option.getAttribute('value') ?? '');
+  await expect(page.getByText(/حُفظت بيانات التسجيل لهذا الجهاز/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
+  const employeeId = await option.getAttribute('value') ?? '';
   await context.setOffline(true);
   try {
-    await quick.getByRole('button', { name: 'تسجيل الحضور', exact: true }).click();
+    await page.goto('/dashboard');
+    await expect(page.getByRole('heading', { name: 'الدوام دون اتصال' })).toBeVisible();
+    await page.getByLabel('الموظف', { exact: true }).selectOption(employeeId);
+    await page.getByRole('button', { name: 'تسجيل الحضور', exact: true }).click();
     await expect(page.getByText('محفوظ محليًا · بانتظار تأكيد الخادم')).toBeVisible();
-    await quick.getByRole('button', { name: 'تسجيل الانصراف للوردية المحلية' }).click();
-    await expect(quick.getByRole('button', { name: 'تسجيل الانصراف للوردية المحلية' })).toHaveCount(0);
+    await page.reload();
+    await page.getByLabel('الموظف', { exact: true }).selectOption(employeeId);
+    await page.getByRole('button', { name: 'تسجيل الانصراف', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'تسجيل الانصراف', exact: true })).toBeDisabled();
   } finally {
     await context.setOffline(false);
   }
+  await expect(page).toHaveURL(/\/attendance/);
   const queue = page.locator('details').filter({ hasText: 'مزامنة الدوام' });
   await queue.locator('summary').click();
   await expect(queue.getByText('تمت المزامنة', { exact: true })).toHaveCount(2);
@@ -100,7 +108,7 @@ test('قشرة التطبيق تعمل دون اتصال ولا تخزن ردو�
   await context.setOffline(true);
   try {
     await page.goto('/dashboard');
-    await expect(page.getByRole('heading', { name: 'لا يوجد اتصال بالإنترنت' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'الدوام دون اتصال' })).toBeVisible();
     const cached = await page.evaluate(async () => {
       const urls = [];
       for (const key of await caches.keys()) {

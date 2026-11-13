@@ -4,19 +4,32 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#244b90">
-  <title>لا يوجد اتصال — أبو قمر</title>
+  <title>الدوام دون اتصال — أبو قمر</title>
   <style>
     body { margin: 0; background: #f3f5f9; color: #0c1220; font: 1rem system-ui, sans-serif; }
-    main { max-width: 30rem; margin: 12vh auto; padding: 1.5rem; }
-    a { display: inline-block; padding: .7rem 1rem; background: #244b90; color: #fff; border-radius: .5rem; }
+    main { max-width: 32rem; margin: auto; padding: 1.5rem; }
+    button, a, select, input { font: inherit; padding: .7rem; border-radius: .5rem; }
+    select, input { box-sizing: border-box; display: block; width: 100%; margin: .35rem 0 1rem; }
+    button, a { display: inline-block; background: #244b90; color: #fff; margin: .25rem 0; }
+    button:disabled { opacity: .55; }
+    li { margin-block: .35rem; }
   </style>
+  <script src="/offline-attendance.js" defer></script>
 </head>
 <body>
   <main>
     <img src="/icon-192.png" width="64" height="64" alt="">
-    <h1>لا يوجد اتصال بالإنترنت</h1>
-    <p>يمكنك إعادة فتح لوحة التحكم عند عودة الاتصال.</p>
-    <a href="/dashboard">إعادة المحاولة</a>
+    <h1>الدوام دون اتصال</h1>
+    <p id="notice">جارٍ فتح بيانات الدوام المحلية…</p>
+    <section id="record" hidden>
+      <label for="search">بحث بالاسم أو الكود</label><input id="search" type="search">
+      <label for="employee">الموظف</label><select id="employee"></select>
+      <button id="in" type="button">تسجيل الحضور</button>
+      <button id="out" type="button">تسجيل الانصراف</button>
+    </section>
+    <p role="status" id="result"></p>
+    <ul id="queue"></ul>
+    <a href="/attendance">فتح الدوام والمزامنة</a>
   </main>
 </body>
 </html>

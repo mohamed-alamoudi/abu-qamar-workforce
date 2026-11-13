@@ -32,6 +32,7 @@ export function dayBoundary(date: Date, timezone: string): Date {
   return DateTime.fromISO(formatDateOnly(date), { zone: timezone }).startOf('day').toJSDate();
 }
 
+const automaticAbsenceReason = 'غياب تلقائي عن يوم عمل مجدول';
 const overlapMessage = 'تتداخل الوردية مع دوام مسجل للموظف. تحقّق من الانصراف والورديات السابقة';
 
 @Injectable()
@@ -47,6 +48,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     this.timer = setInterval(() => {
       void this.scanMissing().catch(() => this.logger.error('تعذّر فحص الورديات المفتوحة'));
+      void this.scanAbsences().catch(() => this.logger.error('تعذّر فحص الغياب التلقائي'));
     }, 5 * 60_000);
     this.timer.unref();
   }
@@ -58,6 +60,56 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
     const release = this.maintenance.trackRequest();
     try {
       await this.scanOpenShifts();
+    } finally {
+      release();
+    }
+  }
+
+  async scanAbsences(now = new Date()) {
+    if (this.maintenance.active) return;
+    const release = this.maintenance.trackRequest();
+    try {
+      const zone = await this.timezone();
+      const today = localDateOf(now, zone);
+      const admin = await this.db.user.findFirst({ where: { role: 'ADMIN', isActive: true }, select: { id: true, username: true } });
+      if (!admin) return;
+      const from = addDays(today, -2);
+      const candidates = await this.schedules.missed(from, addDays(today, -1), undefined, now);
+      const days = new Map(candidates.map(item => [item.employee.id + item.date, item]));
+      for (const { employee, date } of days.values()) {
+        const day = new Date(date + 'T00:00:00Z');
+        await this.db.$transaction(async tx => {
+          await lockEmployee(tx, employee.id);
+          const staff = await tx.employee.findUnique({ where: { id: employee.id } });
+          if (!staff || staff.status !== 'ACTIVE' || localDateOf(staff.createdAt, zone) > day) return;
+          const shifts = (await this.schedules.plannedFor([employee.id], day, day, zone, tx)).get(employee.id) ?? [];
+          if (!shifts.length || shifts.some(shift => +shift.endAt + 2 * 3_600_000 > +now)) return;
+          const closed = await tx.payrollEntry.findFirst({ where: {
+            employeeId: employee.id, periodStart: { lte: day }, periodEnd: { gte: day }, period: { status: 'CLOSED' },
+          }, select: { id: true } });
+          if (closed) return;
+          const start = dayBoundary(day, zone);
+          const end = dayBoundary(addDays(day, 1), zone);
+          const attendance = await tx.workSession.findFirst({ where: {
+            employeeId: employee.id, status: { not: 'VOIDED' }, checkInAt: { lt: end },
+            OR: [{ checkOutAt: { gt: start } }, { checkOutAt: null }],
+          } });
+          if (attendance) return;
+          const leave = await tx.leaveRecord.findFirst({ where: {
+            employeeId: employee.id, startDate: { lte: day }, endDate: { gte: day },
+            OR: [{ status: { in: ['PENDING', 'APPROVED'] } }, { reason: automaticAbsenceReason }],
+          } });
+          if (leave) return;
+          const created = await tx.leaveRecord.create({ data: {
+            employeeId: employee.id, startDate: day, endDate: day, type: 'UNPAID_ABSENCE',
+            reason: automaticAbsenceReason, status: 'PENDING', affectsPay: true, recordedById: admin.id,
+          } });
+          await this.audit.log({ action: 'leave.auto_recorded', entityType: 'leave_record', entityId: created.id,
+            metadata: { employeeId: employee.id, date }, after: created }, tx);
+          await this.notifications.notifyAdmin({ type: 'LEAVE_PENDING', title: 'غياب غير مدفوع بانتظار المراجعة',
+            body: employee.fullName + ' · ' + date, data: { leaveId: created.id } }, tx);
+        });
+      }
     } finally {
       release();
     }
@@ -350,10 +402,17 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
     } });
     if (overlapping) throw Errors.conflict(overlapMessage);
     const firstDate = localDateOf(start, zone);
-    const lastDate = localDateOf(new Date(+(end ?? new Date()) - (end ? 1 : 0)), zone);
-    const leave = await tx.leaveRecord.findFirst({ where: { employeeId, status: { in: ['PENDING', 'APPROVED'] },
+    const lastDate = end ? localDateOf(new Date(+end - 1), zone) : firstDate;
+    const leaves = await tx.leaveRecord.findMany({ where: { employeeId, status: { in: ['PENDING', 'APPROVED'] },
       startDate: { lte: lastDate }, endDate: { gte: firstDate } } });
-    if (leave) throw Errors.conflict('تتداخل الوردية مع إجازة أو غياب مسجل للموظف');
+    for (const leave of leaves) {
+      const automatic = leave.status === 'PENDING' && leave.reason === automaticAbsenceReason &&
+        await tx.auditLog.findFirst({ where: { entityId: leave.id, action: 'leave.auto_recorded' }, select: { id: true } });
+      if (!automatic) throw Errors.conflict('تتداخل الوردية مع إجازة أو غياب مسجل للموظف');
+      await tx.leaveRecord.update({ where: { id: leave.id }, data: { status: 'CANCELLED' } });
+      await this.audit.log({ action: 'leave.auto_cancelled_by_attendance', entityType: 'leave_record', entityId: leave.id,
+        metadata: { employeeId } }, tx);
+    }
   }
 
   private assertBreaks(breaks: { startAt: Date; endAt: Date | null }[], start: Date, end: Date | null) {

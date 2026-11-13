@@ -2,7 +2,7 @@
 
 import { createContext, type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Input, Modal } from '@abu-qamar/ui';
-import { api, errorMessage, registerApiHandlers, setCsrfToken } from '@/lib/api';
+import { api, ApiError, errorMessage, registerApiHandlers, setCsrfToken } from '@/lib/api';
 import { confirmAttendanceWipe } from '@/lib/attendance-queue';
 import type { SessionInfo, SessionUser } from '@/lib/types';
 
@@ -37,6 +37,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const establish = useCallback((info: SessionInfo) => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('aq-offline-attendance') ?? 'null');
+      const permissions = info.user.permissions;
+      if (saved && (saved.userId !== info.user.id || (info.user.role !== 'ADMIN' &&
+          ((saved.checkIn && !permissions.includes('attendance.check_in')) || (saved.checkOut && !permissions.includes('attendance.check_out')))))) {
+        localStorage.removeItem('aq-offline-attendance');
+      }
+    } catch { /* التخزين المحلي اختياري */ }
     setCsrfToken(info.csrfToken);
     setUser(info.user);
     setStatus('authenticated');
@@ -45,7 +53,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       establish(await api.get<SessionInfo>('/auth/me', { silentAuth: true }));
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && [401, 403].includes(error.status)) {
+        try { localStorage.removeItem('aq-offline-attendance'); } catch { /* التخزين المحلي اختياري */ }
+      }
       clear();
     }
   }, [clear, establish]);
@@ -57,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       if (!confirmed) return false;
     }
+    try { localStorage.removeItem('aq-offline-attendance'); } catch { /* التخزين المحلي اختياري */ }
     try {
       await api.post('/auth/logout', {}, { silentAuth: true });
     } catch {
@@ -78,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     registerApiHandlers({
       unauthenticated: clear,
       attendanceAccountDisabled: () => {
+        try { localStorage.removeItem('aq-offline-attendance'); } catch { /* التخزين المحلي اختياري */ }
         clear();
         if (user) void confirmAttendanceWipe(user.id).catch(() => undefined);
       },

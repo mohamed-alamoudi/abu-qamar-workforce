@@ -58,8 +58,24 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   const [times, setTimes] = useState({ checkInAt: '', checkOutAt: '', departmentId: '', reason: '' });
   const staff = useResource<Employee[]>(quick && (view || checkIn || correct) ? '/attendance/employees' : null);
   const departments = useResource<Department[]>((quick && (checkIn || view)) || correct ? '/departments' : null);
+  const offlineRoster = useResource<Employee[]>(quick && checkOut && !checkIn && !view && !correct ? '/attendance/employees' : null);
   const open = useResource<Page<Session>>(quick && (view || checkIn || checkOut) ? '/attendance/open' + toQuery({ page: openPage, pageSize: 20 }) : null, revision);
   const list = useResource<Page<Session>>(view ? '/attendance' + toQuery({ ...filter, employeeId: employeeId ?? filter.employeeId, page, pageSize: 20 }) : null, revision);
+  const [offlineReady, setOfflineReady] = useState(false);
+  useEffect(() => {
+    const roster = staff.data ?? offlineRoster.data;
+    if (!quick || !user || !roster || !(checkIn || checkOut) || !open.data || !navigator.onLine) return;
+    try {
+      localStorage.setItem('aq-offline-attendance', JSON.stringify({
+        userId: user.id, preparedAt: Date.now(), checkIn, checkOut,
+        employees: roster.filter(item => item.status === 'ACTIVE').map(({ id, fullName, code }) => ({ id, fullName, code })),
+        open: open.data.items.filter(item => item.employee.status === 'ACTIVE').map(item => ({
+          id: item.id, employeeId: item.employeeId, version: item.version, onBreak: item.breaks.some(breakItem => !breakItem.endAt),
+        })),
+      }));
+      setOfflineReady(true);
+    } catch { setOfflineReady(false); }
+  }, [quick, user, checkIn, checkOut, staff.data, offlineRoster.data, open.data]);
   const zone = list.data?.timezone ?? open.data?.timezone ?? 'Asia/Gaza';
   const history = useResource<{ id: string; createdAt: string; reason: string; correctedBy: { fullName: string };
     before: Pick<Session, 'checkInAt' | 'checkOutAt'>; after: Pick<Session, 'checkInAt' | 'checkOutAt'> }[]>(
@@ -119,6 +135,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     <Feedback error={staff.error ?? departments.error} />
     {quick && <section id="quick-check-in"><Card className="space-y-4 p-4">
       <h2 className="text-lg font-semibold">التسجيل السريع</h2>
+      {offlineReady && process.env.NODE_ENV === 'production' && <p className="text-sm text-muted">حُفظت بيانات التسجيل لهذا الجهاز. عند انقطاع الاتصال افتح التطبيق للوصول إلى شاشة الدوام المحلية.</p>}
       {(checkIn || correct) && <div className="grid gap-3 sm:grid-cols-2">
         <Input label="بحث عن موظف بالاسم أو الكود" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} />
         <EmployeeSelect employees={activeEmployees.filter(row => row.id === activeSelection || matches(row, staffSearch))}

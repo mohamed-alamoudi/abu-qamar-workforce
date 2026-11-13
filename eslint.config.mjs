@@ -22,6 +22,12 @@ export default [
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
   {
+    files: ['apps/web/public/offline-attendance.js'],
+    languageOptions: { globals: Object.fromEntries(
+      ['document', 'window', 'location', 'navigator', 'localStorage', 'indexedDB', 'crypto', 'Option'].map(name => [name, 'readonly']),
+    ) },
+  },
+  {
     files: ['apps/web/public/sw.js'],
     languageOptions: { globals: { self: 'readonly', caches: 'readonly', fetch: 'readonly', URL: 'readonly', Response: 'readonly' } },
   },

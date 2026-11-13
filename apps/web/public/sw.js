@@ -1,7 +1,7 @@
 /* Only versioned assets and the public offline page are stored. */
-const CACHE = 'aq-shell-v1';
+const CACHE = 'aq-shell-v2';
 const SHELL = '/offline.html';
-const PUBLIC_ASSETS = [SHELL, '/icon-192.png', '/icon-512.png'];
+const PUBLIC_ASSETS = [SHELL, '/offline-attendance.js', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PUBLIC_ASSETS)));
@@ -26,6 +26,10 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || url.origin !== self.location.origin ||
       url.pathname === '/api' || url.pathname.startsWith('/api/')) return;
 
+  if (request.mode === 'navigate' && url.pathname === SHELL) {
+    event.respondWith(caches.match(SHELL).then(response => response || fetch(request)));
+    return;
+  }
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(async () => (await caches.match(SHELL)) || Response.error()));
     return;

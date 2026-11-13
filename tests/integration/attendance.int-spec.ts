@@ -58,6 +58,24 @@ describe('الحضور والانصراف', () => {
     })).toBe(2);
   });
 
+  it('يسجل غياب يوم مجدول مرة واحدة ويقبل حضورًا وصل متأخرًا', async () => {
+    const date = '2026-03-01';
+    await ctx.prisma.employee.update({ where: { id: employeeId }, data: { createdAt: new Date('2026-02-01T10:00Z') } });
+    await admin.post('/schedules', { employeeId, kind: 'FIXED', effectiveFrom: '2026-02-01',
+      weeklyPattern: [{ day: 0, start: '08:00', end: '16:00' }] }).expect(201);
+    const service = ctx.app.get(AttendanceService);
+    await service.scanAbsences(new Date('2026-03-01T20:00Z'));
+    expect(await ctx.prisma.leaveRecord.count()).toBe(0);
+    const nextDay = new Date('2026-03-02T08:00Z');
+    await Promise.all([service.scanAbsences(nextDay), service.scanAbsences(nextDay)]);
+    const record = await ctx.prisma.leaveRecord.findFirstOrThrow();
+    expect(record).toMatchObject({ startDate: new Date(date), type: 'UNPAID_ABSENCE', status: 'PENDING', affectsPay: true });
+    await manual(date + 'T08:00', date + 'T16:00').expect(201);
+    expect(await ctx.prisma.leaveRecord.findUnique({ where: { id: record.id } })).toMatchObject({ status: 'CANCELLED' });
+    await service.scanAbsences(nextDay);
+    expect(await ctx.prisma.leaveRecord.count()).toBe(1);
+  });
+
   it('يمنع إضافة وردية جديدة للموظف الموقوف ويحفظ سجله السابق', async () => {
     const old = await manual('2026-03-01T08:00', '2026-03-01T09:00').expect(201);
     await admin.post('/employees/' + employeeId + '/deactivate', { terminationDate: '2026-03-02' }).expect(200);
