@@ -96,6 +96,7 @@ describe('الموظفون والأقسام', () => {
         { ...base, pay: { ...HOURLY, amount: 10.555 } },
         { ...base, pay: { ...HOURLY, payType: 'WEEKLY' } },
         { ...base, pay: { ...HOURLY, effectiveFrom: '2026-02-30' } },
+        { ...base, pay: { payType: 'HOURLY', amount: 20 } },
         // حقول ممنوعة بنص المتطلبات أو غير معروفة
         { ...base, address: 'غزة' },
         { ...base, code: 'EMP-9999' },

@@ -73,10 +73,10 @@ export function buildPayPayload(form: PayFormState): { error: string } | { pay: 
   if (!/^\d+(\.\d{1,2})?$/.test(form.amount.trim())) {
     return { error: 'قيمة الأجر بخانتين عشريتين على الأكثر' };
   }
+  if (!form.effectiveFrom) return { error: 'حدّد تاريخ بداية سريان الأجر' };
   const built = buildPolicyPayload(form);
   if ('error' in built) return built;
-  const pay: Record<string, unknown> = { payType: form.payType, amount };
-  if (form.effectiveFrom) pay.effectiveFrom = form.effectiveFrom;
+  const pay = { payType: form.payType, amount, effectiveFrom: form.effectiveFrom };
   return { pay, policy: built.policy };
 }
 
@@ -132,7 +132,8 @@ export function PayFields({ value, onChange, currency, policyOnly }: PayFieldsPr
       <Input
         label="تاريخ بداية السريان"
         type="date"
-        hint="اتركه فارغًا ليبدأ من اليوم"
+        required={!policyOnly}
+        hint={policyOnly ? 'اتركه فارغًا لتبدأ السياسة من اليوم' : 'اختر التاريخ المتفق عليه لبدء الأجر'}
         value={value.effectiveFrom}
         onChange={(e) => set('effectiveFrom', e.target.value)}
       />

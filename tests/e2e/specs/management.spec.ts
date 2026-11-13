@@ -56,6 +56,7 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
   await form.getByLabel('الاسم الكامل').fill(employee);
   await form.getByLabel('القسم', { exact: true }).selectOption({ label: department });
   await form.getByLabel(/قيمة الأجر/).fill('25');
+  await form.getByLabel('تاريخ بداية السريان').fill('2025-01-14');
   await form.getByRole('button', { name: 'إضافة الموظف', exact: true }).click();
   await expect(page.getByRole('heading', { name: employee, exact: true })).toBeVisible();
 

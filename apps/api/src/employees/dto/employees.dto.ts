@@ -39,11 +39,10 @@ export class PayRateDto {
   @Max(9_999_999)
   amount: number;
 
-  /** تاريخ بداية السريان (افتراضيًا اليوم) */
-  @IsOptional()
+  /** تاريخ بداية السريان الذي يحدده المستخدم */
   @ToDateOnly()
-  @IsDate({ message: DATE_MESSAGE })
-  effectiveFrom?: Date;
+  @IsDate({ message: 'حدّد تاريخ بداية سريان الأجر بصيغة YYYY-MM-DD' })
+  effectiveFrom: Date;
 }
 
 /** سياسة احتساب الأجر بتاريخ سريان (للأدمن فقط). */

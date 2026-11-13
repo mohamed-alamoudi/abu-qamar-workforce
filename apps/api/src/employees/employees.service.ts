@@ -187,10 +187,9 @@ export class EmployeesService {
     if (!department.isActive) throw Errors.validation('القسم معطّل ولا يمكن إسناد موظفين إليه');
 
     const today = await this.today();
-    const payFrom = dto.pay?.effectiveFrom ?? today;
     const policy = dto.pay ? normalizePolicy(dto.pay.payType, dto.policy) : null;
     // تاريخ القسم يبدأ من أقدم التاريخين حتى يغطي أي دوام يُسجَّل بأثر رجعي
-    const historyFrom = payFrom < today ? payFrom : today;
+    const historyFrom = dto.pay && dto.pay.effectiveFrom < today ? dto.pay.effectiveFrom : today;
 
     const id = await this.prisma.$transaction(async (tx) => {
       const employee = await tx.employee.create({
@@ -211,6 +210,7 @@ export class EmployeesService {
         tx,
       );
       if (dto.pay && policy) {
+        const payFrom = dto.pay.effectiveFrom;
         await tx.payRate.create({
           data: { employeeId: employee.id, payType: dto.pay.payType, amount: dto.pay.amount, effectiveFrom: payFrom, createdById: actor.user.id },
         });
@@ -426,7 +426,7 @@ export class EmployeesService {
    */
   async changePayRate(id: string, dto: ChangePayRateDto, actor: AuthContext, meta: RequestMeta) {
     const employee = await this.findOrThrow(id);
-    const effectiveFrom = dto.effectiveFrom ?? (await this.today());
+    const effectiveFrom = dto.effectiveFrom;
     await this.prisma.$transaction(async (tx) => {
       await lockEmployee(tx, id);
       if (dto.refreshUnpaidPeriods) await this.flagUnpaidPayrollForRefresh(tx, id, effectiveFrom, actor, meta);
