@@ -256,6 +256,10 @@ type NotificationsResponse = Paginated<NotificationItem> & { unreadCount: number
 
 function NotificationsBell() {
   const [open, setOpen] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [pushKey, setPushKey] = useState<string | null>(null);
+  const [subscribed, setSubscribed] = useState(false);
   const [data, setData] = useState<NotificationsResponse | null>(null);
   const close = useCallback(() => setOpen(false), []);
   const ref = useDismiss(open, close);
@@ -270,9 +274,61 @@ function NotificationsBell() {
 
   useEffect(() => {
     void load();
+    if (new URLSearchParams(location.search).has('notifications')) setOpen(true);
+    if ('serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window) {
+      void api.get<{ publicKey: string | null; subscribed: boolean }>('/notifications/push').then(result => {
+        setPushKey(result.publicKey);
+        setSubscribed(result.subscribed);
+      }).catch(() => {});
+    }
     const timer = setInterval(() => void load(), 60_000);
     return () => clearInterval(timer);
   }, [load]);
+
+  async function remove(id?: string) {
+    if (busy || (!id && !window.confirm('مسح كل إشعارات حسابك نهائيًا؟'))) return;
+    setBusy(true);
+    setNotice('');
+    try {
+      await api.delete(id ? '/notifications/' + id : '/notifications');
+      await load();
+      const registration = await navigator.serviceWorker?.getRegistration();
+      const shown = await registration?.getNotifications(id ? { tag: id } : undefined);
+      shown?.forEach(notification => notification.close());
+    } catch {
+      setNotice('تعذر مسح الإشعارات. حاول مرة أخرى.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function togglePush() {
+    if (busy || !pushKey) return;
+    setBusy(true);
+    setNotice('');
+    try {
+      if (!subscribed && await Notification.requestPermission() !== 'granted') {
+        setNotice('اسمح بالإشعارات من إعدادات المتصفح أو الهاتف.');
+        return;
+      }
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (!registration?.active) throw new Error('Service worker unavailable');
+      let subscription = await registration.pushManager.getSubscription();
+      if (subscribed) {
+        await api.delete('/notifications/push');
+        await subscription?.unsubscribe();
+      } else {
+        subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKey });
+        const { endpoint, keys } = subscription.toJSON();
+        await api.post('/notifications/push', { endpoint, p256dh: keys?.p256dh, auth: keys?.auth });
+      }
+      setSubscribed(!subscribed);
+    } catch {
+      setNotice('تعذر تغيير إعداد إشعارات الهاتف. حاول مرة أخرى.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const markAll = async () => {
     try {
@@ -313,6 +369,13 @@ function NotificationsBell() {
               </button>
             )}
           </div>
+          <div className="flex flex-wrap gap-3 border-b border-line px-4 py-2 text-xs">
+            {pushKey && <button type="button" disabled={busy} onClick={() => void togglePush()} className="underline">
+              {subscribed ? 'إيقاف إشعارات الهاتف' : 'تفعيل إشعارات الهاتف'}
+            </button>}
+            {!!data?.total && <button type="button" disabled={busy} onClick={() => void remove()} className="underline">مسح الكل نهائيًا</button>}
+            {notice && <p role="alert" className="w-full">{notice}</p>}
+          </div>
           <ul className="max-h-96 divide-y divide-line overflow-y-auto">
             {!data || data.items.length === 0 ? (
               <li className="px-4 py-8 text-center text-sm text-muted">لا توجد إشعارات</li>
@@ -325,6 +388,7 @@ function NotificationsBell() {
                   </div>
                   <p className="mt-1 text-sm text-muted">{n.body}</p>
                   <p className="tabular mt-1 text-xs text-muted">{formatDateTime(n.createdAt)}</p>
+                  <button type="button" disabled={busy} onClick={() => void remove(n.id)} className="mt-1 text-xs underline">حذف الإشعار</button>
                 </li>
               ))
             )}

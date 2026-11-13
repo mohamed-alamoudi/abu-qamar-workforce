@@ -78,7 +78,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       const days = new Map(candidates.map(item => [item.employee.id + item.date, item]));
       for (const { employee, date } of days.values()) {
         const day = new Date(date + 'T00:00:00Z');
-        await this.db.$transaction(async tx => {
+        const notification = await this.db.$transaction(async tx => {
           await lockEmployee(tx, employee.id);
           const staff = await tx.employee.findUnique({ where: { id: employee.id } });
           if (!staff || staff.status !== 'ACTIVE' || localDateOf(staff.createdAt, zone) > day) return;
@@ -106,9 +106,10 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
           } });
           await this.audit.log({ action: 'leave.auto_recorded', entityType: 'leave_record', entityId: created.id,
             metadata: { employeeId: employee.id, date }, after: created }, tx);
-          await this.notifications.notifyAdmin({ type: 'LEAVE_PENDING', title: 'غياب غير مدفوع بانتظار المراجعة',
+          return this.notifications.notifyAdmin({ type: 'LEAVE_PENDING', title: 'غياب غير مدفوع بانتظار المراجعة',
             body: employee.fullName + ' · ' + date, data: { leaveId: created.id } }, tx);
         });
+        this.notifications.deliver(notification);
       }
     } finally {
       release();

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { flushAttendance, QUEUE_CHANGED, readQueue, type QueueItem, type QueueState } from '@/lib/attendance-queue';
+import { dismissAttendance, flushAttendance, QUEUE_CHANGED, readQueue, type QueueItem, type QueueState } from '@/lib/attendance-queue';
 
 const labels: Record<QueueState, string> = {
   LOCAL: 'محفوظ محليًا',
@@ -55,13 +55,17 @@ export function AttendanceQueuePanel({ userId }: { userId: string }) {
   if (!items.length) return null;
   return (
     <details className="mb-4 rounded-lg border border-line bg-surface p-3">
-      <summary className="cursor-pointer font-semibold">مزامنة الدوام · {items.filter(({ state }) => state !== 'SYNCED').length} للمراجعة أو الإرسال</summary>
+      <summary className="cursor-pointer font-semibold">مزامنة الدوام · {items.filter(({ state }) => ['LOCAL', 'PENDING', 'SENDING'].includes(state)).length} بانتظار الإرسال · {items.filter(({ state }) => ['FAILED', 'CONFLICT'].includes(state)).length} تحتاج مراجعة</summary>
       <ul className="mt-3 max-h-64 space-y-2 overflow-auto">
         {[...items].sort((a, b) => b.operation.createdAt.localeCompare(a.operation.createdAt)).map((item) => (
           <li key={item.operation.operationId} className="border-b border-line pb-2 text-sm">
             <strong>{labels[item.state]}</strong> · {new Date(item.operation.createdAt).toLocaleString('ar')}
             {item.message && <p>{item.message}</p>}
             {item.conflictData?.currentVersion && <p>الإصدار الحالي {item.conflictData.currentVersion} · إصدار الجهاز {item.conflictData.baseVersion}</p>}
+            {['FAILED', 'CONFLICT', 'SYNCED'].includes(item.state) && <button type="button" className="mt-1 underline"
+              onClick={() => void dismissAttendance(userId, item.operation.operationId).catch(() => setStorageError(true))}>
+              إزالة من الطابور
+            </button>}
           </li>
         ))}
       </ul>

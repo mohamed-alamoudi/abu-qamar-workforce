@@ -1,5 +1,5 @@
 /* Only versioned assets and the public offline page are stored. */
-const CACHE = 'aq-shell-v3';
+const CACHE = 'aq-shell-v4';
 const SHELL = '/offline.html';
 const PUBLIC_ASSETS = [SHELL, '/offline-attendance.js', '/icon-192.png', '/icon-512.png'];
 
@@ -18,6 +18,21 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data === 'ACTIVATE_UPDATE') event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener('push', event => {
+  const id = event.data?.json()?.id;
+  if (typeof id !== 'string') return;
+  event.waitUntil(self.registration.showNotification('سوبر ماركت أبو قمر', {
+    body: 'عندك إشعار جديد في النظام.',
+    icon: '/icon-192.png',
+    tag: id,
+  }));
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(self.clients.openWindow('/dashboard?notifications=1'));
 });
 
 self.addEventListener('fetch', (event) => {

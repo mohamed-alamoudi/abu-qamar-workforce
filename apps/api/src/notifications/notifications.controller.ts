@@ -1,12 +1,25 @@
-import { Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import type { AuthContext } from '../common/auth/auth.types';
 import { AnyAuthenticated, Auth } from '../common/auth/decorators';
 import { paginate, PaginationQueryDto, toSkipTake } from '../common/dto/pagination.dto';
 import { Errors } from '../common/errors/app-exception';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { isPushEndpoint, PushService } from './push.service';
+
+class PushSubscriptionDto {
+  @IsString()
+  @MaxLength(2048)
+  endpoint!: string;
+
+  @Matches(/^[\w-]{87}$/)
+  p256dh!: string;
+
+  @Matches(/^[\w-]{22}$/)
+  auth!: string;
+}
 
 export class NotificationsQueryDto extends PaginationQueryDto {
   @IsOptional()
@@ -20,7 +33,41 @@ export class NotificationsQueryDto extends PaginationQueryDto {
 @Controller('notifications')
 @AnyAuthenticated()
 export class NotificationsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly push: PushService) {}
+
+  @Get('push')
+  async pushConfig(@Auth() auth: AuthContext) {
+    const publicKey = this.push.publicKey;
+    const subscribed = publicKey ? await this.prisma.pushSubscription.count({ where: { sessionId: auth.session.id } }) > 0 : false;
+    return { publicKey, subscribed };
+  }
+
+  @Post('push')
+  async subscribe(@Auth() auth: AuthContext, @Body() dto: PushSubscriptionDto) {
+    if (!this.push.publicKey || !isPushEndpoint(dto.endpoint)) throw Errors.validation('اشتراك إشعارات الهاتف غير صالح');
+    const data = { ...dto, sessionId: auth.session.id };
+    await this.prisma.pushSubscription.upsert({ where: { endpoint: dto.endpoint }, create: data, update: data });
+    return { ok: true };
+  }
+
+  @Delete('push')
+  async unsubscribe(@Auth() auth: AuthContext) {
+    await this.prisma.pushSubscription.deleteMany({ where: { sessionId: auth.session.id } });
+    return { ok: true };
+  }
+
+  @Delete()
+  async removeAll(@Auth() auth: AuthContext) {
+    const result = await this.prisma.notification.deleteMany({ where: { userId: auth.user.id } });
+    return { deleted: result.count };
+  }
+
+  @Delete(':id')
+  async remove(@Auth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.prisma.notification.deleteMany({ where: { id, userId: auth.user.id } });
+    if (!result.count) throw Errors.notFound('الإشعار غير موجود');
+    return { ok: true };
+  }
 
   @Get()
   @ApiOperation({ summary: 'إشعارات المستخدم الحالي مع عدد غير المقروء' })

@@ -308,10 +308,22 @@ model Session {
   revokedReason  String?   @db.VarChar(64)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pushSubscriptions PushSubscription[]
 
   @@index([userId, revokedAt])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+model PushSubscription {
+  endpoint  String @id
+  sessionId String @db.Uuid
+  p256dh    String
+  auth      String
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("push_subscriptions")
 }
 
 model UserRecoveryCode {

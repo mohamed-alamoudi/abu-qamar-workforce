@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { randomUUID } from 'node:crypto';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from './api';
-import { confirmAttendanceWipe, enqueueAttendance, flushAttendance, readQueue, retryDelay } from './attendance-queue';
+import { confirmAttendanceWipe, dismissAttendance, enqueueAttendance, flushAttendance, readQueue, retryDelay } from './attendance-queue';
 
 const storage = new Map<string, string>();
 const navigatorStub = { onLine: false };
@@ -60,6 +60,11 @@ it('stores conflicts for review and keeps queues isolated by account', async () 
   });
   await flushAttendance(userId);
   expect((await readQueue(userId))[0]).toMatchObject({ state: 'CONFLICT', conflictData: { currentVersion: 2 } });
+  navigatorStub.onLine = false;
+  const pending = await enqueueAttendance(userId, { action: 'CHECK_IN', employeeId: randomUUID() });
+  await dismissAttendance(userId, pending.operation.operationId);
+  await dismissAttendance(userId, item.operation.operationId);
+  expect(await readQueue(userId)).toEqual([pending]);
   expect(await readQueue(randomUUID())).toEqual([]);
 });
 

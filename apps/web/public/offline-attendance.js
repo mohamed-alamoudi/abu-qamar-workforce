@@ -84,6 +84,20 @@
         const employee = saved.employees.find(entry => entry.id === (operation.employeeId ?? linked?.employeeId));
         const times = [operation.checkInAt, operation.checkOutAt].filter(Boolean).map(value => localTime(value).replace('T', ' '));
         li.textContent = [labelsByAction[operation.action], employee?.fullName, ...times, labels[item.state], item.message].filter(Boolean).join(' · ');
+        if (['FAILED', 'CONFLICT'].includes(item.state)) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.textContent = 'إزالة من الطابور';
+          remove.addEventListener('click', async () => {
+            try {
+              await transaction('readwrite', store => store.delete(operation.operationId));
+              await refresh();
+            } catch {
+              say('تعذرت إزالة العملية.');
+            }
+          });
+          li.append(' ', remove);
+        }
         return li;
       }));
       buttons();

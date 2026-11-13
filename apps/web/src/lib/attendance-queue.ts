@@ -66,6 +66,16 @@ export function readQueue(userId: string): Promise<QueueItem[]> {
   return transaction(userId, 'readonly', (store) => store.getAll());
 }
 
+export async function dismissAttendance(userId: string, operationId: string): Promise<void> {
+  await lock(userId, async () => {
+    const item = await transaction<QueueItem | undefined>(userId, 'readonly', store => store.get(operationId));
+    if (item && ['FAILED', 'CONFLICT', 'SYNCED'].includes(item.state)) {
+      await transaction(userId, 'readwrite', store => store.delete(operationId));
+      window.dispatchEvent(new Event(QUEUE_CHANGED));
+    }
+  });
+}
+
 async function write(userId: string, item: QueueItem) {
   await transaction(userId, 'readwrite', (store) => store.put(item));
   window.dispatchEvent(new Event(QUEUE_CHANGED));

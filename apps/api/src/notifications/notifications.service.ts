@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { NotificationType, Prisma } from '@abu-qamar/database';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { PushService } from './push.service';
 
 export interface NewNotification {
   type: NotificationType;
@@ -13,17 +14,22 @@ export interface NewNotification {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly push: PushService) {}
 
   async notifyUser(userId: string, n: NewNotification): Promise<void> {
-    await this.prisma.notification.create({ data: { userId, ...n } });
+    const notification = await this.prisma.notification.create({ data: { userId, ...n } });
+    this.deliver(notification);
+  }
+
+  deliver(notification: { userId: string; id: string } | undefined): void {
+    if (notification) void this.push.send(notification.userId, notification.id);
   }
 
   /** إشعار للأدمن الرئيسي. لا يُفشل العملية الأصلية إن تعذر حفظ الإشعار. */
-  async notifyAdmin(n: NewNotification, tx?: Prisma.TransactionClient): Promise<void> {
+  async notifyAdmin(n: NewNotification, tx?: Prisma.TransactionClient) {
     if (tx) {
       const admin = await tx.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true } });
-      if (admin) await tx.notification.create({ data: { userId: admin.id, ...n } });
+      if (admin) return tx.notification.create({ data: { userId: admin.id, ...n } });
       return;
     }
     try {
