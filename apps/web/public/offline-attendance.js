@@ -40,8 +40,8 @@
     let reconnect = false;
     function shiftFor(id) {
       const pending = items.filter(item => ['LOCAL', 'PENDING', 'SENDING', 'SYNCED'].includes(item.state));
-      const local = pending.find(({ operation }) =>
-        operation.employeeId === id &&
+      const local = pending.find(({ operation, state }) =>
+        state !== 'SYNCED' && operation.employeeId === id &&
         (operation.action === 'CHECK_IN' || (operation.action === 'MANUAL' && !operation.checkOutAt)) &&
         !pending.some(item => item.operation.sessionId === operation.operationId && item.operation.action === 'CHECK_OUT'));
       const existing = saved.open.find(item => item.employeeId === id);
