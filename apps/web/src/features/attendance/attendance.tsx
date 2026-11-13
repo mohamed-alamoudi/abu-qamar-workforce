@@ -51,6 +51,8 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   const [staffSearch, setStaffSearch] = useState('');
   const [historySearch, setHistorySearch] = useState('');
   const [department, setDepartment] = useState('');
+  const [quickArrival, setQuickArrival] = useState('');
+  const [quickDeparture, setQuickDeparture] = useState('');
   const [filter, setFilter] = useState({ employeeId: '', departmentId: '', from: '', to: '', status: '', approvalStatus: '' });
   const [page, setPage] = useState(1);
   const [openPage, setOpenPage] = useState(1);
@@ -64,18 +66,21 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   const [offlineReady, setOfflineReady] = useState(false);
   useEffect(() => {
     const roster = staff.data ?? offlineRoster.data;
-    if (!quick || !user || !roster || !(checkIn || checkOut) || !open.data || !navigator.onLine) return;
+    if (!quick || !user || !roster || !(checkIn || checkOut || correct) || ((checkIn || checkOut) && !open.data) || !navigator.onLine) return;
     try {
       localStorage.setItem('aq-offline-attendance', JSON.stringify({
-        userId: user.id, preparedAt: Date.now(), checkIn, checkOut,
+        userId: user.id, preparedAt: Date.now(), checkIn, checkOut, correct,
+        timezone: open.data?.timezone ?? list.data?.timezone ?? 'Asia/Gaza',
+        departments: departments.data?.filter(item => item.isActive).map(({ id, name }) => ({ id, name })) ?? [],
         employees: roster.filter(item => item.status === 'ACTIVE').map(({ id, fullName, code }) => ({ id, fullName, code })),
-        open: open.data.items.filter(item => item.employee.status === 'ACTIVE').map(item => ({
-          id: item.id, employeeId: item.employeeId, version: item.version, onBreak: item.breaks.some(breakItem => !breakItem.endAt),
+        open: (open.data?.items ?? []).filter(item => item.employee.status === 'ACTIVE').map(item => ({
+          id: item.id, employeeId: item.employeeId, version: item.version, checkInAt: item.checkInAt,
+          onBreak: item.breaks.some(breakItem => !breakItem.endAt),
         })),
       }));
       setOfflineReady(true);
     } catch { setOfflineReady(false); }
-  }, [quick, user, checkIn, checkOut, staff.data, offlineRoster.data, open.data]);
+  }, [quick, user, checkIn, checkOut, correct, staff.data, offlineRoster.data, open.data, list.data?.timezone, departments.data]);
   const zone = list.data?.timezone ?? open.data?.timezone ?? 'Asia/Gaza';
   const history = useResource<{ id: string; createdAt: string; reason: string; correctedBy: { fullName: string };
     before: Pick<Session, 'checkInAt' | 'checkOutAt'>; after: Pick<Session, 'checkInAt' | 'checkOutAt'> }[]>(
@@ -123,9 +128,10 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   }
   function checkout(row: Session) {
     if (!navigator.onLine) return storeOffline({
-      action: 'CHECK_OUT', sessionId: row.id, baseVersion: row.version, checkOutAt: new Date().toISOString(),
+      action: 'CHECK_OUT', sessionId: row.id, baseVersion: row.version, checkOutAt: quickDeparture || new Date().toISOString(),
     });
-    return run(() => api.post('/attendance/check-out', { employeeId: row.employeeId, sessionId: row.id, baseVersion: row.version }), 'تم تسجيل الانصراف');
+    return run(() => api.post('/attendance/check-out', { employeeId: row.employeeId, sessionId: row.id, baseVersion: row.version,
+      at: quickDeparture || undefined }), 'تم تسجيل الانصراف');
   }
   const time = (at: string | null) => at ? localTime(at, zone) : 'غير مسجّل';
   if (!view && (!quick || (!checkIn && !checkOut && !correct))) return <p className="text-muted">ليست لديك صلاحية عرض سجلات الدوام.</p>;
@@ -142,16 +148,21 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
           value={activeSelection} onChange={setSelected} required />
         <DepartmentSelect departments={availableDepartments.filter(row => row.isActive)} value={department} onChange={setDepartment} />
       </div>}
+      {(checkIn || checkOut) && <div className="grid gap-3 sm:grid-cols-2">
+        {checkIn && <Input label="وقت الحضور (اختياري)" type="datetime-local" value={quickArrival} onChange={e => setQuickArrival(e.target.value)} />}
+        {checkOut && <Input label="وقت الانصراف (اختياري)" type="datetime-local" value={quickDeparture} onChange={e => setQuickDeparture(e.target.value)} />}
+        <p className="text-sm text-muted">التوقيت حسب النظام ({zone}). اترك الحقل فارغًا للتسجيل بالوقت الحالي.</p>
+      </div>}
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         {checkIn && <Button className="min-h-14" disabled={!activeSelection || Boolean(chosenOpen || queuedOpen)} loading={busy}
           onClick={() => void (navigator.onLine
-            ? run(() => api.post('/attendance/check-in', { employeeId: selected, departmentId: department || undefined }), 'تم تسجيل الحضور')
-            : storeOffline({ action: 'CHECK_IN', employeeId: selected, departmentId: department || undefined, checkInAt: new Date().toISOString() }))}>
+            ? run(() => api.post('/attendance/check-in', { employeeId: selected, departmentId: department || undefined, at: quickArrival || undefined }), 'تم تسجيل الحضور')
+            : storeOffline({ action: 'CHECK_IN', employeeId: selected, departmentId: department || undefined, checkInAt: quickArrival || new Date().toISOString() }))}>
           <LogIn size={20} /> تسجيل الحضور
         </Button>}
         {checkOut && activeSelection && queuedOpen && <Button className="min-h-14" variant="secondary" loading={busy}
           onClick={() => void storeOffline({ action: 'CHECK_OUT', sessionId: queuedOpen.operation.operationId,
-            baseVersion: 1, checkOutAt: new Date().toISOString() })}><LogOut size={20} /> تسجيل الانصراف للوردية المحلية</Button>}
+            baseVersion: 1, checkOutAt: quickDeparture || new Date().toISOString() })}><LogOut size={20} /> تسجيل الانصراف للوردية المحلية</Button>}
         {checkOut && chosenOpen && <Button disabled={pendingCheckout(chosenOpen.id)} className="min-h-14" variant="secondary" loading={busy} onClick={() => void checkout(chosenOpen)}>
           <LogOut size={20} /> تسجيل الانصراف
         </Button>}

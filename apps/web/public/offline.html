@@ -7,7 +7,12 @@
   <title>الدوام دون اتصال — أبو قمر</title>
   <style>
     body { margin: 0; background: #f3f5f9; color: #0c1220; font: 1rem system-ui, sans-serif; }
-    main { max-width: 32rem; margin: auto; padding: 1.5rem; }
+    main { max-width: 42rem; margin: auto; padding: 1.5rem; }
+    section { background: #fff; padding: 1rem; border: 1px solid #dbe2ed; border-radius: .75rem; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #101827; color: #eff4ff; color-scheme: dark; }
+      section { background: #182235; border-color: #364359; }
+    }
     button, a, select, input { font: inherit; padding: .7rem; border-radius: .5rem; }
     select, input { box-sizing: border-box; display: block; width: 100%; margin: .35rem 0 1rem; }
     button, a { display: inline-block; background: #244b90; color: #fff; margin: .25rem 0; }
@@ -19,13 +24,21 @@
 <body>
   <main>
     <img src="/icon-192.png" width="64" height="64" alt="">
-    <h1>الدوام دون اتصال</h1>
+    <h1>الحضور والانصراف</h1>
     <p id="notice">جارٍ فتح بيانات الدوام المحلية…</p>
     <section id="record" hidden>
       <label for="search">بحث بالاسم أو الكود</label><input id="search" type="search">
       <label for="employee">الموظف</label><select id="employee"></select>
+      <div id="department-field" hidden>
+        <label for="department">قسم الوردية</label><select id="department"></select>
+      </div>
+      <p id="zone"></p>
+      <p id="open-shift"></p>
+      <div id="arrival-field"><label for="arrival">وقت الحضور</label><input id="arrival" type="datetime-local"></div>
+      <div id="departure-field"><label for="departure">وقت الانصراف</label><input id="departure" type="datetime-local"></div>
       <button id="in" type="button">تسجيل الحضور</button>
       <button id="out" type="button">تسجيل الانصراف</button>
+      <button id="manual" type="button">حفظ وردية كاملة</button>
     </section>
     <p role="status" id="result"></p>
     <ul id="queue"></ul>

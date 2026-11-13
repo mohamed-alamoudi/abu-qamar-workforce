@@ -70,22 +70,33 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
   await context.setOffline(true);
   try {
     await page.goto('/dashboard');
-    await expect(page.getByRole('heading', { name: 'الدوام دون اتصال' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'الحضور والانصراف' })).toBeVisible();
     await page.getByLabel('الموظف', { exact: true }).selectOption(employeeId);
+    const arrival = '2025-01-15T08:00';
+    const departure = '2025-01-15T10:00';
+    await page.getByLabel('وقت الحضور').fill(arrival);
     await page.getByRole('button', { name: 'تسجيل الحضور', exact: true }).click();
     await expect(page.getByText('محفوظ محليًا · بانتظار تأكيد الخادم')).toBeVisible();
     await page.reload();
     await page.getByLabel('الموظف', { exact: true }).selectOption(employeeId);
+    await page.getByLabel('وقت الانصراف').fill(departure);
     await page.getByRole('button', { name: 'تسجيل الانصراف', exact: true }).click();
     await expect(page.getByRole('button', { name: 'تسجيل الانصراف', exact: true })).toBeDisabled();
+    await page.getByLabel('وقت الحضور').fill('2025-01-14T22:00');
+    await page.getByLabel('وقت الانصراف').fill('2025-01-15T02:00');
+    await page.getByRole('button', { name: 'حفظ وردية كاملة' }).click();
+    await expect(page.getByText(/وردية يدوية.*2025-01-14 22:00.*2025-01-15 02:00/)).toBeVisible();
   } finally {
     await context.setOffline(false);
   }
   await expect(page).toHaveURL(/\/attendance/);
   const queue = page.locator('details').filter({ hasText: 'مزامنة الدوام' });
   await queue.locator('summary').click();
-  await expect(queue.getByText('تمت المزامنة', { exact: true })).toHaveCount(2);
-  await expect(page.getByRole('heading', { name: new RegExp(employee) })).toBeVisible();
+  await expect(queue.getByText('تمت المزامنة', { exact: true })).toHaveCount(3);
+  const shifts = page.getByRole('article').filter({ has: page.getByRole('heading', { name: new RegExp(employee) }) });
+  await expect(shifts).toHaveCount(2);
+  await expect(shifts.filter({ hasText: /الحضور 2025-01-15 08:00.*الانصراف 2025-01-15 10:00/ })).toHaveCount(1);
+  await expect(shifts.filter({ hasText: /الحضور 2025-01-14 22:00.*الانصراف 2025-01-15 02:00/ })).toHaveCount(1);
 });
 
 test('الواجهة على الجوال ضمن عرض الشاشة', async ({ page, isMobile }) => {
@@ -108,7 +119,7 @@ test('قشرة التطبيق تعمل دون اتصال ولا تخزن ردو�
   await context.setOffline(true);
   try {
     await page.goto('/dashboard');
-    await expect(page.getByRole('heading', { name: 'الدوام دون اتصال' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'الحضور والانصراف' })).toBeVisible();
     const cached = await page.evaluate(async () => {
       const urls = [];
       for (const key of await caches.keys()) {

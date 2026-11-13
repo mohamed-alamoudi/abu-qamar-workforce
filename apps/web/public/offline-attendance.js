@@ -22,23 +22,44 @@
       tx.onabort = () => reject(tx.error);
     });
     const select = get('employee');
+    const arrival = get('arrival');
+    const departure = get('departure');
+    const department = get('department');
+    const zone = saved.timezone ?? 'Asia/Gaza';
+    const formatter = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+    const localTime = value => value && (value.length === 16 ? value : formatter.format(new Date(value)).replace(' ', 'T'));
+    const resetTimes = () => { arrival.value = departure.value = localTime(new Date().toISOString()); };
+    get('zone').textContent = 'الأوقات حسب توقيت النظام (' + zone + ')';
+    department.add(new Option('القسم الافتراضي', ''));
+    for (const item of saved.departments ?? []) department.add(new Option(item.name, item.id));
     let items = [];
     let busy = false;
     let reconnect = false;
     function shiftFor(id) {
       const pending = items.filter(item => ['LOCAL', 'PENDING', 'SENDING', 'SYNCED'].includes(item.state));
-      const local = pending.filter(item => item.state !== 'SYNCED').findLast(({ operation }) =>
-        operation.employeeId === id && operation.action === 'CHECK_IN');
+      const local = pending.find(({ operation }) =>
+        operation.employeeId === id &&
+        (operation.action === 'CHECK_IN' || (operation.action === 'MANUAL' && !operation.checkOutAt)) &&
+        !pending.some(item => item.operation.sessionId === operation.operationId && item.operation.action === 'CHECK_OUT'));
       const existing = saved.open.find(item => item.employeeId === id);
-      const shift = local ? { id: local.operation.operationId, version: 1 } : existing;
+      const shift = local ? { id: local.operation.operationId, version: 1, checkInAt: local.operation.checkInAt } : existing;
       if (shift && !pending.some(({ operation }) => operation.sessionId === shift.id && operation.action === 'CHECK_OUT')) return shift;
     }
     function buttons() {
       const shift = shiftFor(select.value);
       get('in').hidden = !saved.checkIn;
       get('out').hidden = !saved.checkOut;
+      get('manual').hidden = !saved.correct;
+      get('department-field').hidden = !((saved.checkIn || saved.correct) && department.options.length > 1);
+      get('arrival-field').hidden = !(saved.checkIn || saved.correct);
+      get('departure-field').hidden = !(saved.checkOut || saved.correct);
+      get('open-shift').textContent = shift ? 'وردية مفتوحة · ' + (localTime(shift.checkInAt)?.replace('T', ' ') ?? '') : '';
       get('in').disabled = busy || !select.value || !!shift;
       get('out').disabled = busy || !select.value || !shift || shift.onBreak;
+      get('manual').disabled = busy || !select.value;
     }
     function renderEmployees() {
       const selected = select.value;
@@ -56,8 +77,13 @@
       const labels = { LOCAL: 'محفوظ محليًا', PENDING: 'بانتظار المزامنة', SENDING: 'جارٍ الإرسال', CONFLICT: 'يوجد تعارض', FAILED: 'فشل الإرسال' };
       get('queue').replaceChildren(...items.filter(item => item.state !== 'SYNCED').map(item => {
         const li = document.createElement('li');
-        const label = item.operation.action === 'CHECK_IN' ? 'حضور' : item.operation.action === 'CHECK_OUT' ? 'انصراف' : 'تعديل دوام';
-        li.textContent = label + ' · ' + labels[item.state] + (item.message ? ' · ' + item.message : '');
+        const operation = item.operation;
+        const labelsByAction = { CHECK_IN: 'حضور', CHECK_OUT: 'انصراف', MANUAL: 'وردية يدوية', CORRECTION: 'تعديل دوام' };
+        const linked = items.find(entry => entry.operation.operationId === operation.sessionId)?.operation ??
+          saved.open.find(shift => shift.id === operation.sessionId);
+        const employee = saved.employees.find(entry => entry.id === (operation.employeeId ?? linked?.employeeId));
+        const times = [operation.checkInAt, operation.checkOutAt].filter(Boolean).map(value => localTime(value).replace('T', ' '));
+        li.textContent = [labelsByAction[operation.action], employee?.fullName, ...times, labels[item.state], item.message].filter(Boolean).join(' · ');
         return li;
       }));
       buttons();
@@ -74,9 +100,28 @@
           const shift = shiftFor(id);
           const now = new Date().toISOString();
           let fields;
-          if (action === 'CHECK_IN' && saved.checkIn && !shift) fields = { employeeId: id, checkInAt: now };
-          if (action === 'CHECK_OUT' && saved.checkOut && shift && !shift.onBreak) fields = { sessionId: shift.id, baseVersion: shift.version, checkOutAt: now };
-          if (!fields) return;
+          if (action === 'CHECK_IN' && saved.checkIn && !shift) {
+            fields = { employeeId: id, checkInAt: arrival.value, departmentId: department.value || undefined };
+          }
+          if (action === 'CHECK_OUT' && saved.checkOut && shift && !shift.onBreak) {
+            fields = { sessionId: shift.id, baseVersion: shift.version, checkOutAt: departure.value };
+          }
+          if (action === 'MANUAL' && saved.correct) {
+            fields = { employeeId: id, checkInAt: arrival.value, checkOutAt: departure.value, departmentId: department.value || undefined };
+          }
+          if (!fields) {
+            say('تغيّرت حالة الوردية. راجع الدوام وحاول مرة أخرى.');
+            return;
+          }
+          if ((action !== 'CHECK_OUT' && !fields.checkInAt) || (action !== 'CHECK_IN' && !fields.checkOutAt)) {
+            say('حدد التاريخ والوقت قبل الحفظ.');
+            return;
+          }
+          const start = fields.checkInAt ?? localTime(shift?.checkInAt);
+          if (start && fields.checkOutAt && fields.checkOutAt <= start) {
+            say('وقت الانصراف لازم يكون بعد وقت الحضور.');
+            return;
+          }
           const deviceId = localStorage.getItem('aq-device-id') ?? crypto.randomUUID();
           localStorage.setItem('aq-device-id', deviceId);
           const operation = { ...fields, action, deviceId, operationId: crypto.randomUUID(), createdAt: now };
@@ -100,7 +145,9 @@
     select.addEventListener('change', buttons);
     get('in').addEventListener('click', () => void record('CHECK_IN'));
     get('out').addEventListener('click', () => void record('CHECK_OUT'));
+    get('manual').addEventListener('click', () => void record('MANUAL'));
     window.addEventListener('online', () => { reconnect = true; if (!busy) location.replace('/attendance'); });
+    resetTimes();
     renderEmployees();
     await refresh();
   } catch {
