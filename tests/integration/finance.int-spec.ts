@@ -69,6 +69,7 @@ describe('محرك الرواتب والحسابات المالية', () => {
     expect(await ctx.prisma.payrollEntry.count({ where: { periodId: draft.id } })).toBe(1);
     const supervisor = await createSupervisor(ctx, admin, ['finance.view']);
     await supervisor.client.delete(path).expect(403);
+    await ctx.prisma.session.updateMany({ where: { userId: adminId }, data: { reauthAt: null } });
     await admin.delete(path).expect(403);
     await reauth();
     await admin.delete(path).expect(200);
