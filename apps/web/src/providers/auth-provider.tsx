@@ -6,7 +6,7 @@ import { api, ApiError, errorMessage, registerApiHandlers, setCsrfToken } from '
 import { confirmAttendanceWipe } from '@/lib/attendance-queue';
 import type { SessionInfo, SessionUser } from '@/lib/types';
 
-type Status = 'loading' | 'authenticated' | 'anonymous';
+type Status = 'loading' | 'authenticated' | 'anonymous' | 'unavailable';
 
 interface AuthContextValue {
   status: Status;
@@ -56,8 +56,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.status)) {
         try { localStorage.removeItem('aq-offline-attendance'); } catch { /* التخزين المحلي اختياري */ }
+        clear();
+      } else {
+        setStatus(previous => previous === 'authenticated' ? previous : 'unavailable');
       }
-      clear();
     }
   }, [clear, establish]);
 

@@ -2,13 +2,13 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { type ReactNode, useEffect } from 'react';
-import { Spinner } from '@abu-qamar/ui';
+import { Button, Spinner } from '@abu-qamar/ui';
 import { AppShell } from '@/components/app-shell';
 import { useAuth } from '@/providers/auth-provider';
 
 /** كل صفحات النظام الداخلية: تتطلب جلسة صالحة يؤكدها الخادم (/auth/me). */
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { status, user } = useAuth();
+  const { status, user, refresh } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -18,6 +18,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       router.replace(`/login${next}`);
     }
   }, [status, pathname, router]);
+
+  if (status === 'unavailable') return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 p-4 text-center">
+      <p role="status">تعذّر التحقق من الجلسة مؤقتًا. إذا كانت عملية التصفير جارية، انتظر اكتمالها.</p>
+      <Button onClick={() => void refresh()}>إعادة الاتصال</Button>
+    </div>
+  );
 
   if (status !== 'authenticated' || !user) {
     return (
