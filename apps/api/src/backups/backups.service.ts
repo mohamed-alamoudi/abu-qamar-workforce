@@ -1,6 +1,7 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { BackupRecord, BackupType, Prisma, PrismaClient } from '@abu-qamar/database';
 import { DateTime } from 'luxon';
+import { randomUUID } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { APP_CONFIG, AppConfig } from '../common/config/env';
@@ -100,7 +101,8 @@ function diffCounts(expected: Record<string, number>, actual: Record<string, num
 }
 
 @Injectable()
-export class BackupsService {
+export class BackupsService implements OnModuleInit, OnModuleDestroy {
+  private scheduleTimer?: ReturnType<typeof setInterval>;
   private readonly logger = new Logger(BackupsService.name);
   private readonly pgTools: PgTools;
   /** نسخة أو استرداد واحد في الوقت نفسه داخل هذه العملية */
@@ -119,6 +121,20 @@ export class BackupsService {
   }
 
   // ───────────────────────────── أدوات داخلية ─────────────────────────────
+
+  onModuleInit() {
+    if (process.env.BACKUP_SCHEDULE_ON_API !== 'true' || !this.config.backup.encryptionKey) return;
+    const run = () => {
+      if (this.busy || this.maintenance.active) return;
+      void this.runScheduled().catch(() => this.logger.warn('تعذر تشغيل مهمة النسخ المجدولة'));
+    };
+    this.scheduleTimer = setInterval(run, 60 * 60_000);
+    run();
+  }
+
+  onModuleDestroy() {
+    clearInterval(this.scheduleTimer);
+  }
 
   private get key(): string {
     const key = this.config.backup.encryptionKey;
@@ -550,7 +566,7 @@ export class BackupsService {
     return this.exclusive(async () => {
       const inspected = await this.inspect(id);
       const current = parseDatabaseUrl(this.config.databaseUrl).database;
-      const scratch = scratchName ?? `${current}_restore_drill`.slice(0, 63);
+      const scratch = scratchName ?? 'aq_restore_' + randomUUID().replaceAll('-', '');
       if (!/^[a-z][a-z0-9_]{0,62}$/.test(scratch) || scratch === current) throw Errors.validation('اسم قاعدة التجربة غير صالح');
       const scratchUrl = withDatabaseName(this.toolsDatabaseUrl, scratch);
 

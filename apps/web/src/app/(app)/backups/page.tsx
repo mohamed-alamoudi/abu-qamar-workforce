@@ -138,6 +138,14 @@ export default function BackupsPage() {
               <div className="flex flex-wrap gap-2">
                 <button className={button} disabled={busy} onClick={() => setPreview(undefined)}>إغلاق</button>
                 <button className={button} disabled={busy || !preview.data.schema.compatible} onClick={() => {
+                  void perform(async () => {
+                    const result = await api.post<{ ok: boolean; tables: number; totalRows: number }>('/backups/' + preview.id + '/drill');
+                    if (!result.ok) throw new Error('بيانات الاسترداد التجريبي لا تطابق النسخة.');
+                    setMessage(`نجح الاسترداد على قاعدة منفصلة · ${result.tables} جدول · ${result.totalRows} صف.`);
+                    setList(await api.get<BackupList>('/backups'));
+                  });
+                }}>اختبار الاسترداد على قاعدة منفصلة</button>
+                <button className={button} disabled={busy || !preview.data.schema.compatible} onClick={() => {
                   if (!window.confirm('سيُسترد محتوى النسخة الكامل، بما فيه حسابات الدخول وقت أخذ النسخة، بعد إنشاء نسخة أمان. هل تريد المتابعة؟')) return;
                   void perform(async () => {
                     await api.post('/backups/' + preview.id + '/restore');

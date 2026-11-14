@@ -52,6 +52,13 @@ class BackupsController {
     return this.backups.verify(id, auth, meta);
   }
 
+  @Post(':id/drill')
+  @HttpCode(200)
+  @RequireReauth()
+  drill(@Param('id', ParseUUIDPipe) id: string, @Auth() auth: AuthContext, @Meta() meta: RequestMeta) {
+    return this.backups.drill(id, auth, meta);
+  }
+
   @Post(':id/restore')
   @HttpCode(200)
   @RequireReauth()
