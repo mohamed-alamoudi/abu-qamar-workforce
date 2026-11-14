@@ -1,5 +1,9 @@
 /* The static fallback uses the same IndexedDB queue and operation format as the online attendance page. */
 (async () => {
+  let theme;
+  try { theme = localStorage.getItem('aq-theme'); } catch { /* use device theme */ }
+  document.documentElement.classList.toggle('dark', theme === 'dark' ||
+    (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches));
   const get = id => document.getElementById(id);
   const say = message => { get('result').textContent = message; };
   try {
@@ -108,6 +112,26 @@
     }
     async function refresh() {
       items = await transaction('readonly', store => store.getAll());
+      const openShifts = get('open-shifts');
+      openShifts.replaceChildren();
+      for (const employee of saved.employees) {
+        const shift = shiftFor(employee.id);
+        if (!shift) continue;
+        const row = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = employee.fullName + (shift.checkInAt ? ' · ' + localTime(shift.checkInAt).replace('T', ' ') : '');
+        button.addEventListener('click', () => {
+          selected = employee.id;
+          search.value = employee.fullName;
+          results.hidden = true;
+          buttons();
+          get('record').scrollIntoView();
+        });
+        row.append(button);
+        openShifts.append(row);
+      }
+      get('open-card').hidden = !openShifts.childElementCount;
       const labels = { LOCAL: 'محفوظ محليًا', PENDING: 'بانتظار المزامنة', SENDING: 'جارٍ الإرسال', CONFLICT: 'يوجد تعارض', FAILED: 'فشل الإرسال' };
       get('queue').replaceChildren(...items.filter(item => item.state !== 'SYNCED').map(item => {
         const li = document.createElement('li');
@@ -134,6 +158,7 @@
         }
         return li;
       }));
+      get('queue-card').hidden = !get('queue').childElementCount;
       buttons();
     }
     async function record(action) {
