@@ -21,7 +21,9 @@
       tx.oncomplete = () => resolve(request.result);
       tx.onabort = () => reject(tx.error);
     });
-    const select = get('employee');
+    const search = get('search');
+    const results = get('employee-results');
+    let selected = '';
     const arrival = get('arrival');
     const departure = get('departure');
     const department = get('department');
@@ -65,7 +67,7 @@
       if (shift && !pending.some(({ operation }) => operation.sessionId === shift.id && operation.action === 'CHECK_OUT')) return shift;
     }
     function buttons() {
-      const shift = shiftFor(select.value);
+      const shift = shiftFor(selected);
       get('in').hidden = !saved.checkIn;
       get('out').hidden = !saved.checkOut;
       get('manual').hidden = !saved.correct;
@@ -73,19 +75,35 @@
       get('arrival-field').hidden = !(saved.checkIn || saved.correct);
       get('departure-field').hidden = !(saved.checkOut || saved.correct);
       get('open-shift').textContent = shift ? 'وردية مفتوحة · ' + (localTime(shift.checkInAt)?.replace('T', ' ') ?? '') : '';
-      get('in').disabled = busy || !select.value || !!shift;
-      get('out').disabled = busy || !select.value || !shift || shift.onBreak;
-      get('manual').disabled = busy || !select.value;
+      get('in').disabled = busy || !selected || !!shift;
+      get('out').disabled = busy || !selected || !shift || shift.onBreak;
+      get('manual').disabled = busy || !selected;
     }
     function renderEmployees() {
-      const selected = select.value;
-      const query = get('search').value.trim().toLowerCase();
-      select.replaceChildren(new Option('اختر الموظف', ''));
+      const query = search.value.trim().toLowerCase();
+      results.replaceChildren();
+      results.hidden = false;
       for (const employee of saved.employees) {
         const label = employee.fullName + ' · ' + employee.code;
-        if (label.toLowerCase().includes(query)) select.add(new Option(label, employee.id));
+        if (!label.toLowerCase().includes(query)) continue;
+        const row = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.addEventListener('click', () => {
+          selected = employee.id;
+          search.value = employee.fullName;
+          results.hidden = true;
+          buttons();
+        });
+        row.append(button);
+        results.append(row);
       }
-      select.value = selected;
+      if (!results.childElementCount) {
+        const row = document.createElement('li');
+        row.textContent = 'لا توجد نتائج';
+        results.append(row);
+      }
       buttons();
     }
     async function refresh() {
@@ -125,7 +143,7 @@
       try {
         const save = async () => {
           items = await transaction('readonly', store => store.getAll());
-          const id = select.value;
+          const id = selected;
           if (!saved.employees.some(employee => employee.id === id)) return;
           const shift = shiftFor(id);
           const now = new Date().toISOString();
@@ -175,14 +193,13 @@
     }
     get('notice').textContent = 'تُحفظ العمليات على هذا الجهاز وتُرسل عند عودة الاتصال.';
     get('record').hidden = false;
-    get('search').addEventListener('input', renderEmployees);
-    select.addEventListener('change', buttons);
+    search.addEventListener('focus', renderEmployees);
+    search.addEventListener('input', () => { selected = ''; renderEmployees(); });
     get('in').addEventListener('click', () => void record('CHECK_IN'));
     get('out').addEventListener('click', () => void record('CHECK_OUT'));
     get('manual').addEventListener('click', () => void record('MANUAL'));
     window.addEventListener('online', () => { reconnect = true; void resumeOnline(); });
     window.setInterval(() => void resumeOnline(), 2500);
-    renderEmployees();
     await refresh();
   } catch {
     get('notice').textContent = 'تعذر فتح بيانات الدوام المحلية. افتح التطبيق عند عودة الاتصال.';

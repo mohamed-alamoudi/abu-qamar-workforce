@@ -53,6 +53,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   const [showTime, setShowTime] = useState(false);
   const [payrollWarnings, setPayrollWarnings] = useState<PayrollWarning[]>([]);
   const [staffSearch, setStaffSearch] = useState('');
+  const [searchingStaff, setSearchingStaff] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [department, setDepartment] = useState('');
   const [quickArrival, setQuickArrival] = useState('');
@@ -180,9 +181,20 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
       <h2 className="text-lg font-semibold">التسجيل السريع</h2>
       {offlineReady && process.env.NODE_ENV === 'production' && <p className="text-sm text-muted">حُفظت بيانات التسجيل لهذا الجهاز. عند انقطاع الاتصال افتح التطبيق للوصول إلى شاشة الدوام المحلية.</p>}
       {(checkIn || checkOut || correct) && <div className="grid gap-3 sm:grid-cols-2">
-        <Input label="بحث عن موظف بالاسم أو الكود" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} />
-        <EmployeeSelect employees={registrationEmployees.filter(row => row.id === activeSelection || matches(row, staffSearch))}
-          value={activeSelection} onChange={setSelected} required />
+        <div>
+          <Input label="بحث عن موظف بالاسم أو الكود" type="search" autoComplete="off" value={staffSearch}
+            onFocus={() => setSearchingStaff(true)}
+            onChange={e => { setStaffSearch(e.target.value); setSelected(''); setSearchingStaff(true); }} />
+          {searchingStaff && <ul aria-label="نتائج البحث عن موظف" className="mt-1 max-h-56 overflow-auto rounded-lg border border-line bg-surface">
+            {registrationEmployees.filter(row => matches(row, staffSearch)).map(row => <li key={row.id}>
+              <button type="button" className="min-h-11 w-full px-3 text-start text-sm hover:bg-subtle"
+                onClick={() => { setSelected(row.id); setStaffSearch(row.fullName); setSearchingStaff(false); }}>
+                {row.fullName} · {row.code}
+              </button>
+            </li>)}
+            {!registrationEmployees.some(row => matches(row, staffSearch)) && <li className="p-3 text-sm text-muted">لا توجد نتائج</li>}
+          </ul>}
+        </div>
         <DepartmentSelect departments={availableDepartments.filter(row => row.isActive)} value={department} onChange={setDepartment} />
       </div>}
       {(checkIn || checkOut) && <Button variant="ghost" aria-expanded={showTime} onClick={() => {

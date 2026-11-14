@@ -62,17 +62,19 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
 
   await page.goto('/attendance');
   const quick = page.locator('#quick-check-in');
-  const select = quick.getByLabel('الموظف', { exact: true });
-  const option = select.getByRole('option', { name: new RegExp(employee) });
-  await expect(option).toHaveCount(1);
+  const chooseEmployee = async () => {
+    await page.getByLabel('بحث عن موظف بالاسم أو الكود').fill(suffix);
+    await page.getByRole('button', { name: new RegExp(employee) }).click();
+  };
+  await chooseEmployee();
+  await expect(quick.getByLabel('بحث عن موظف بالاسم أو الكود')).toHaveValue(employee);
   await expect(page.getByText(/حُفظت بيانات التسجيل لهذا الجهاز/)).toBeVisible();
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
-  const employeeId = await option.getAttribute('value') ?? '';
   await context.setOffline(true);
   try {
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: 'الحضور والانصراف' })).toBeVisible();
-    await page.getByLabel('الموظف', { exact: true }).selectOption(employeeId);
+    await chooseEmployee();
     const arrival = '2025-01-15T08:00';
     const departure = '2025-01-15T10:00';
     await page.getByText('تحديد التاريخ والوقت', { exact: true }).click();
@@ -80,7 +82,7 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
     await page.getByRole('button', { name: 'تسجيل الحضور', exact: true }).click();
     await expect(page.getByText('محفوظ محليًا · بانتظار تأكيد الخادم')).toBeVisible();
     await page.reload();
-    await page.getByLabel('الموظف', { exact: true }).selectOption(employeeId);
+    await chooseEmployee();
     await page.getByText('تحديد التاريخ والوقت', { exact: true }).click();
     await page.getByLabel('وقت الانصراف').fill(departure);
     await page.getByRole('button', { name: 'تسجيل الانصراف', exact: true }).click();

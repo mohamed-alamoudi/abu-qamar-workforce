@@ -27,8 +27,8 @@
     <h1>الحضور والانصراف</h1>
     <p id="notice">جارٍ فتح بيانات الدوام المحلية…</p>
     <section id="record" hidden>
-      <label for="search">بحث بالاسم أو الكود</label><input id="search" type="search">
-      <label for="employee">الموظف</label><select id="employee"></select>
+      <label for="search">بحث عن موظف بالاسم أو الكود</label><input id="search" type="search" autocomplete="off">
+      <ul id="employee-results" aria-label="نتائج البحث عن موظف" style="max-height: 14rem; overflow: auto" hidden></ul>
       <div id="department-field" hidden>
         <label for="department">قسم الوردية</label><select id="department"></select>
       </div>
