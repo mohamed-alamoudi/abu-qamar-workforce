@@ -38,6 +38,19 @@
     let items = [];
     let busy = false;
     let reconnect = false;
+    let checkingConnection = false;
+    async function resumeOnline() {
+      if (busy || checkingConnection || !navigator.onLine) return;
+      checkingConnection = true;
+      try {
+        const response = await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+        if (response.ok && !busy) location.replace('/attendance');
+      } catch {
+        // A browser can report connectivity before the server is reachable.
+      } finally {
+        checkingConnection = false;
+      }
+    }
     function shiftFor(id) {
       const pending = items.filter(item => ['LOCAL', 'PENDING', 'SENDING', 'SYNCED'].includes(item.state));
       const local = pending.find(({ operation, state }) =>
@@ -150,7 +163,7 @@
       } finally {
         busy = false;
         buttons();
-        if (reconnect && navigator.onLine) location.replace('/attendance');
+        if (reconnect) void resumeOnline();
       }
     }
     get('notice').textContent = 'تُحفظ العمليات على هذا الجهاز وتُرسل عند عودة الاتصال.';
@@ -160,7 +173,8 @@
     get('in').addEventListener('click', () => void record('CHECK_IN'));
     get('out').addEventListener('click', () => void record('CHECK_OUT'));
     get('manual').addEventListener('click', () => void record('MANUAL'));
-    window.addEventListener('online', () => { reconnect = true; if (!busy) location.replace('/attendance'); });
+    window.addEventListener('online', () => { reconnect = true; void resumeOnline(); });
+    window.setInterval(() => void resumeOnline(), 2500);
     resetTimes();
     renderEmployees();
     await refresh();
