@@ -84,6 +84,7 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
     await page.getByText('تحديد التاريخ والوقت', { exact: true }).click();
     await page.getByLabel('وقت الانصراف').fill(departure);
     await page.getByRole('button', { name: 'تسجيل الانصراف', exact: true }).click();
+    await expect(page.locator('#queue').getByText(/انصراف.*2025-01-15 10:00/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'تسجيل الانصراف', exact: true })).toBeDisabled();
     await page.getByLabel('وقت الحضور').fill('2025-01-14T22:00');
     await page.getByLabel('وقت الانصراف').fill('2025-01-15T02:00');

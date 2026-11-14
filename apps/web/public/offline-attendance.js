@@ -147,8 +147,12 @@
             say('حدد التاريخ والوقت قبل الحفظ.');
             return;
           }
-          const start = fields.checkInAt ?? localTime(shift?.checkInAt);
-          if (start && fields.checkOutAt && localTime(fields.checkOutAt) < start) {
+          const start = fields.checkInAt ?? shift?.checkInAt;
+          const end = fields.checkOutAt;
+          const invalidOrder = start && end && (start.length === 16 && end.length === 16
+            ? end <= start
+            : localTime(end) < localTime(start));
+          if (invalidOrder) {
             say('وقت الانصراف لازم يكون بعد وقت الحضور.');
             return;
           }
