@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@abu-qamar/database';
 import { lockEmployee } from '../attendance/attendance-common';
 import { AttendanceService } from '../attendance/attendance.service';
+import { lockPayroll } from '../payroll/payroll.service';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { Errors } from '../common/errors/app-exception';
 import type { AttendanceOperationDto } from './attendance-sync.dto';
@@ -58,6 +59,7 @@ export class SharedAttendanceWriter implements AttendanceWriter {
 
   async correction(tx: Prisma.TransactionClient, input: AttendanceWrite) {
     if (!input.reason?.trim()) throw Errors.validation('أدخل سبب التصحيح');
+    await lockPayroll(tx);
     const row = await this.session(tx, input);
     return this.attendance.correct(row.id, {
       checkInAt: input.checkInAt, checkOutAt: input.checkOutAt, departmentId: input.departmentId,

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowRight, Construction, Lock } from 'lucide-react';
+import { ArrowRight, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
@@ -47,17 +47,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <dt className="text-xs text-muted">{label}</dt>
       <dd className="mt-1 text-sm font-medium">{children}</dd>
     </div>
-  );
-}
-
-function Planned({ phase, text }: { phase: number; text: string }) {
-  return (
-    <Card className="flex flex-col items-center gap-3 p-10 text-center">
-      <Construction className="size-9 text-warning-500" />
-      <p className="text-sm text-muted">
-        {text} — يُضاف في المرحلة {phase} من خطة التنفيذ.
-      </p>
-    </Card>
   );
 }
 
@@ -428,7 +417,6 @@ function FinanceTab({ employee, currency, onChanged }: { employee: Employee; cur
         </Card>
       )}
 
-      <Planned phase={4} text="المستحقات والدفعات والسلف والديون والأرصدة" />
 
       <ActionModal
         open={modal === 'rate'}

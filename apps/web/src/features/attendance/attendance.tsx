@@ -50,6 +50,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   const [selected, setSelected] = useState('');
   const [section, setSection] = useState<'record' | 'review' | 'history'>('record');
   const [showTime, setShowTime] = useState(false);
+  const [payrollWarnings, setPayrollWarnings] = useState<string[]>([]);
   const [staffSearch, setStaffSearch] = useState('');
   const [historySearch, setHistorySearch] = useState('');
   const [department, setDepartment] = useState('');
@@ -119,14 +120,18 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     setDialog({ kind, row });
   }
   function action(row: Session, path: string, extra: object = {}) {
-    return run(() => api.post('/attendance/' + row.id + '/' + path, { version: row.version, ...extra }));
+    return run(async () => {
+      const result = await api.post<{ payrollWarnings?: string[] }>('/attendance/' + row.id + '/' + path, { version: row.version, ...extra });
+      if (path === 'approve') setPayrollWarnings(result.payrollWarnings ?? []);
+    });
   }
   function bulkTransition(action: 'review' | 'approve') {
     const { departmentId, from, to } = filter;
-    return run(() => api.post<{ updated: number; skipped: number }>('/attendance/bulk/' + action, {
+    return run(() => api.post<{ updated: number; skipped: number; payrollWarnings?: string[] }>('/attendance/bulk/' + action, {
       employeeId: employeeId || filter.employeeId || undefined,
       departmentId: departmentId || undefined, from: from || undefined, to: to || undefined,
-    }), ({ updated, skipped }) => {
+    }), ({ updated, skipped, payrollWarnings }) => {
+      if (action === 'approve') setPayrollWarnings(payrollWarnings ?? []);
       if (!updated && !skipped) return 'لا توجد سجلات مؤهلة لهذا الإجراء في النطاق المحدد.';
       const label = action === 'review' ? 'أُرسلت للمراجعة' : 'اعتُمدت';
       return label + ' · عدد السجلات: ' + updated +
@@ -153,6 +158,11 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
         }}>{label}</Button>)}
     </nav>}
     <Feedback {...feedback} />
+    {payrollWarnings.length > 0 && <Card className="space-y-2 p-4">
+      <p className="font-semibold">مستحقات تحتاج مراجعة</p>
+      <ul className="list-inside list-disc text-sm">{payrollWarnings.map(message => <li key={message}>{message}</li>)}</ul>
+      <Link className="text-sm underline" href="/employees">فتح ملفات الموظفين</Link>
+    </Card>}
     <Feedback error={staff.error ?? departments.error} />
     {quick && section === 'record' && <section id="quick-check-in"><Card className="space-y-4 p-4">
       <h2 className="text-lg font-semibold">التسجيل السريع</h2>

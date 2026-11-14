@@ -9,6 +9,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { ToDateOnly } from '../common/utils/dates';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OvertimeModule } from '../overtime/overtime.module';
+import { PayrollModule } from '../payroll/payroll.module';
 import { INSTANT_REGEX, SchedulesModule } from '../schedules/schedules.module';
 import { SettingsModule } from '../settings/settings.module';
 import { AttendanceService } from './attendance.service';
@@ -160,7 +161,7 @@ class AttendanceController {
   }
 }
 
-@Module({ imports: [SettingsModule, SchedulesModule, OvertimeModule, NotificationsModule],
+@Module({ imports: [SettingsModule, SchedulesModule, OvertimeModule, NotificationsModule, PayrollModule],
   controllers: [AttendanceController], providers: [AttendanceService], exports: [AttendanceService] })
 export class AttendanceModule { }
 export { AttendanceService } from './attendance.service';

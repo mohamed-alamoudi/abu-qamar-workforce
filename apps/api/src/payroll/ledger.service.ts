@@ -232,6 +232,9 @@ export class LedgerService {
       await this.employee(tx, employeeId);
       const entries = await tx.payrollEntry.findMany({ where: { employeeId, period: { status: 'CLOSED' } },
         include: { period: { select: { label: true, frequency: true } } }, orderBy: { periodStart: 'desc' } });
+      const provisional = await tx.payrollEntry.aggregate({
+        where: { employeeId, period: { status: { not: 'CLOSED' } } }, _sum: { netAmount: true },
+      });
       const advances = await tx.advanceAccount.aggregate({ where: { employeeId, status: 'OPEN' }, _sum: { remainingBalance: true } });
       const debts = await tx.debtAccount.aggregate({ where: { employeeId, status: 'OPEN' }, _sum: { remainingBalance: true } });
       const totals = await tx.financialTransaction.groupBy({ by: ['type'], where: {
@@ -239,6 +242,7 @@ export class LedgerService {
       }, _sum: { amount: true } });
       const total = (type: 'SALARY_PAYMENT' | 'SETTLEMENT') => totals.find((row) => row.type === type)?._sum.amount ?? money('0');
       return {
+        provisional: provisional._sum.netAmount ?? money('0'),
         gross: entries.reduce((sum, entry) => sum.plus(entry.grossAmount), money('0')),
         net: entries.reduce((sum, entry) => sum.plus(entry.netAmount), money('0')),
         paid: total('SALARY_PAYMENT'), settled: total('SETTLEMENT'),

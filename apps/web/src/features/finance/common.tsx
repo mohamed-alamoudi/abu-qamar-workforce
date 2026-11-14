@@ -35,11 +35,14 @@ export function FinanceAccess({ children }: { children: ReactNode }) {
 }
 
 export function FinanceLinks() {
-  return <nav aria-label="الحسابات المالية" className="mb-5 flex flex-wrap gap-2">
+  return <details className="mb-5 rounded-lg border border-line bg-surface p-3">
+    <summary className="cursor-pointer text-sm font-semibold">الحسابات المالية</summary>
+    <nav aria-label="الحسابات المالية" className="mt-3 flex flex-wrap gap-2">
     <Link className="rounded-lg border border-line px-3 py-2 text-sm" href="/payroll">فترات الرواتب</Link>
     {Object.entries(ledgerLinks).map(([key, label]) =>
       <Link key={key} className="rounded-lg border border-line px-3 py-2 text-sm" href={`/payroll/accounts/${key}`}>{label}</Link>)}
-  </nav>;
+    </nav>
+  </details>;
 }
 
 export function useFinanceData<T>(path: string | null) {

@@ -221,10 +221,15 @@ function ReportPanel({ report, employeeId }: { report: Report; employeeId?: stri
           {!employeeId && state.scope === 'department' && <Choice label="القسم" value={state.departmentId || ''} empty="اختر قسمًا" choices={Object.fromEntries((options?.departments ?? []).map((d) => [d.id, d.name]))} onChange={(value) => update('departmentId', value)} />}
           <label className="grid gap-1 text-sm">من تاريخ<Input dir="ltr" type="date" value={state.from || ''} onChange={(e) => update('from', e.target.value)} /></label>
           <label className="grid gap-1 text-sm">إلى تاريخ<Input dir="ltr" type="date" value={state.to || ''} onChange={(e) => update('to', e.target.value)} /></label>
+        </div>
+        <details className="rounded-lg border border-line p-3">
+          <summary className="cursor-pointer text-sm font-medium">خيارات إضافية</summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <label className="grid gap-1 text-sm">بحث في النتائج<Input value={state.search || ''} maxLength={100} onChange={(e) => update('search', e.target.value)} /></label>
           <Choice label="الترتيب" value={state.sortDir || ''} empty="الافتراضي" choices={{ asc: 'تصاعدي', desc: 'تنازلي' }} onChange={(value) => update('sortDir', value)} />
           {active.map(([key, label, choices]) => <Choice key={key} label={label} value={state[key] || ''} empty="الافتراضي" choices={choices} onChange={(value) => update(key, value)} />)}
-        </div>
+          </div>
+        </details>
         {optionsError && <p role="alert" className="text-danger-600">{optionsError}</p>}
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" onClick={() => { reset(); setPage(1); setEmployeeSearch(''); setExportError(''); }}>مسح الفلاتر</Button>

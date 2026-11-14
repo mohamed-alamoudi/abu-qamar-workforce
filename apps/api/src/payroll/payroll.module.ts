@@ -198,5 +198,6 @@ class LedgerController {
   imports: [SettingsModule],
   controllers: [PayrollController, LedgerController],
   providers: [PayrollService, LedgerService, AdjustmentsService],
+  exports: [PayrollService],
 })
 export class PayrollModule {}

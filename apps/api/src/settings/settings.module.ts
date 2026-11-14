@@ -59,8 +59,8 @@ export class SettingsService {
   ) {}
 
   /** الإعدادات الحالية (المحفوظة فوق الافتراضية). */
-  async getAll(): Promise<SettingsMap> {
-    const rows = await this.prisma.systemSetting.findMany();
+  async getAll(db: Pick<PrismaService, 'systemSetting'> = this.prisma): Promise<SettingsMap> {
+    const rows = await db.systemSetting.findMany();
     const result: Record<string, unknown> = { ...DEFAULT_SETTINGS };
     for (const row of rows) {
       if (row.key in DEFAULT_SETTINGS && typeof row.value === typeof result[row.key]) result[row.key] = row.value;

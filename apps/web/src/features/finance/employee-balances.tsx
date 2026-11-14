@@ -6,11 +6,13 @@ import { formatMoney } from '@/lib/format';
 import { useFinanceData } from './common';
 
 type Balances = {
+  provisional: string;
   gross: string; net: string; paid: string; settled: string; outstanding: string; advances: string; debts: string;
   entries: { id: string; periodId: string; period: { label: string }; outstanding: string }[];
 };
 
 const labels = {
+  provisional: 'مستحق مبدئي للفترات المفتوحة',
   gross: 'إجمالي الأجور', net: 'صافي المستحق', paid: 'المدفوع', settled: 'المسوّى',
   outstanding: 'المتبقي للصرف', advances: 'السلف القائمة', debts: 'الديون القائمة',
 } as const;

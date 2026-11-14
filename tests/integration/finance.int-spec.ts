@@ -101,7 +101,7 @@ describe('محرك الرواتب والحسابات المالية', () => {
     };
     const paidEmployee = await createHourly('عامل قبض');
     await approveShift(await record(paidEmployee));
-    const { id } = await period();
+    const { id } = await ctx.prisma.payrollPeriod.findFirstOrThrow({ where: { entries: { some: { employeeId: paidEmployee } } } });
     await calc(id);
     await close(id);
     const existing = await ctx.prisma.payrollEntry.findMany({ where: { periodId: id } });
@@ -199,8 +199,9 @@ describe('محرك الرواتب والحسابات المالية', () => {
     const row = attendance.body;
     await admin.post('/attendance/' + row.id + '/review', { version: row.version }).expect(201);
     await admin.post('/attendance/' + row.id + '/approve', { version: row.version + 1 }).expect(201);
-    const { id } = await period();
-    await calc(id);
+    const { id } = await ctx.prisma.payrollPeriod.findFirstOrThrow({ where: { entries: { some: { employeeId } } } });
+    const preliminary = (await admin.get('/employees/' + employeeId + '/financial-balances').expect(200)).body;
+    expect(amount(preliminary.provisional)).toBe('60.00');
     const entry = await close(id);
     expect(amount(entry.netAmount)).toBe('60.00');
     const payment = await admin.post('/payments', {

@@ -10,6 +10,7 @@ import { addDays, formatDateOnly } from '../common/utils/dates';
 import { MaintenanceService } from '../maintenance/maintenance.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OvertimeService } from '../overtime/overtime.module';
+import { lockPayroll, PayrollService } from '../payroll/payroll.service';
 import { computeDeviations } from '../schedules/schedule-math';
 import { SchedulesService } from '../schedules/schedules.service';
 import { SettingsService } from '../settings/settings.module';
@@ -43,7 +44,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly db: PrismaService, private readonly audit: AuditService,
     private readonly settings: SettingsService, private readonly schedules: SchedulesService,
     private readonly overtime: OvertimeService, private readonly notifications: NotificationsService,
-    private readonly maintenance: MaintenanceService) {}
+    private readonly maintenance: MaintenanceService, private readonly payroll: PayrollService) {}
 
   onModuleInit() {
     this.timer = setInterval(() => {
@@ -240,6 +241,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
   async correct(id: string, input: CorrectionInput, actor: AuthContext, meta: RequestMeta, transaction?: Db) {
     this.authorize(actor, 'attendance.correct');
     return this.operation('correct', input, actor, async tx => {
+      await lockPayroll(tx);
       const row = await this.lockedSession(tx, id, input.baseVersion ?? input.version);
       if (!input.reason.trim()) throw Errors.validation('أدخل سبب التصحيح');
       const zone = await this.timezone();
@@ -272,6 +274,9 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       await this.overtime.refresh(tx, row.employeeId, row.workDate);
       if (+workDate !== +row.workDate) await this.overtime.refresh(tx, row.employeeId, workDate);
       await this.log(tx, 'correct', actor, meta, after, row);
+      if (row.approvalStatus === 'APPROVED') {
+        await this.payroll.refreshForAttendance(tx, row.employeeId, row.workDate, false, actor, meta);
+      }
       return after;
     }, transaction);
   }
@@ -293,22 +298,25 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
     });
     let updated = 0;
     let skipped = 0;
+    const payrollWarnings = new Set<string>();
     for (const candidate of candidates) {
       try {
-        await this.transition(candidate.id, action, candidate.version, actor, meta);
+        const result = await this.transition(candidate.id, action, candidate.version, actor, meta);
+        result.payrollWarnings?.forEach(message => payrollWarnings.add(message));
         updated++;
       } catch (error) {
         if (!(error instanceof AppException) || ![404, 409].includes(error.getStatus())) throw error;
         skipped++;
       }
     }
-    return { updated, skipped };
+    return { updated, skipped, ...(payrollWarnings.size ? { payrollWarnings: [...payrollWarnings] } : {}) };
   }
 
   async transition(id: string, action: 'review' | 'approve' | 'void', version: number, actor: AuthContext, meta: RequestMeta, reason?: string) {
     if (action === 'review') this.authorize(actor, 'attendance.correct');
     else if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
     return this.db.$transaction(async tx => {
+      if (action !== 'review') await lockPayroll(tx);
       const row = await this.lockedSession(tx, id, version);
       if (action === 'void') {
         if (!reason?.trim()) throw Errors.validation('أدخل سبب الإلغاء');
@@ -316,7 +324,8 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
           voidReason: reason.trim(), version: { increment: 1 }, updatedById: actor.user.id }, include });
         await this.overtime.refresh(tx, row.employeeId, row.workDate);
         await this.log(tx, action, actor, meta, after, row);
-        return after;
+        if (row.approvalStatus === 'APPROVED') await this.payroll.refreshForAttendance(tx, row.employeeId, row.workDate, false, actor, meta);
+        return { ...after, payrollWarnings: undefined };
       }
       const expected = action === 'review' ? 'DRAFT' : 'IN_REVIEW';
       const toStatus = action === 'review' ? 'IN_REVIEW' : 'APPROVED';
@@ -326,8 +335,10 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       }, include });
       await tx.attendanceApproval.create({ data: { sessionId: id, fromStatus: expected, toStatus, actorId: actor.user.id, note: reason } });
       await this.log(tx, action, actor, meta, after, row);
-      return after;
-    });
+      const payroll = action === 'approve' ? await this.payroll.refreshForAttendance(tx, row.employeeId, row.workDate, true, actor, meta) : null;
+      return { ...after, payrollWarnings: payroll?.blockers.filter(item => ['NO_RATE', 'CLOSED_PERIOD', 'PAYROLL_OVERLAP'].includes(item.code))
+        .map(item => row.employee.fullName + ' · ' + item.message) };
+    }, { timeout: 30_000 });
   }
 
   async recordBreak(id: string, start: boolean, version: number, actor: AuthContext, meta: RequestMeta, isPaid = false) {

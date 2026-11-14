@@ -140,7 +140,8 @@ function Details({ id }: { id: string }) {
       {entry.snapshot?.needsRefresh && <p className="mt-2 text-sm text-danger-600">تغيّر الأجر. حدّث هذا المستحق قبل الصرف.</p>}
       <dl className="my-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
         {Object.entries({ 'الإجمالي': entry.grossAmount, 'الخصومات': entry.deductionsAmount, 'الصافي': entry.netAmount,
-          'المسدّد بالدفعات والتسويات': entry.paidAmount }).map(([label, amount]) =>
+          'المسدّد بالدفعات والتسويات': entry.paidAmount,
+          ...(row.status === 'CLOSED' ? { 'المتبقي للصرف': (Number(entry.netAmount) - Number(entry.paidAmount)).toFixed(2) } : {}) }).map(([label, amount]) =>
           <div key={label}><dt className="text-muted">{label}</dt><dd>{formatMoney(amount, currency)}</dd></div>)}
       </dl>
       <details>

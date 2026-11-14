@@ -230,7 +230,7 @@ export class PayrollService {
   }
 
   private async prepare(tx: Tx, period: PayrollPeriod, timezone: string,
-    refresh?: { protectedEmployees: Set<string>; existingEmployees: Set<string> }) {
+    refresh?: { protectedEmployees: Set<string>; existingEmployees: Set<string> }, onlyEmployeeId?: string) {
     const { id, startDate, endDate, frequency } = period;
     const overlap = { effectiveFrom: { lte: endDate }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: startDate } }] };
     const dates = { gte: startDate, lte: endDate };
@@ -241,6 +241,7 @@ export class PayrollService {
       effectiveFrom: { lte: scheduleEnd }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: scheduleStart } }],
     };
     const employees = await tx.employee.findMany({
+      where: { id: onlyEmployeeId },
       orderBy: { id: 'asc' },
       select: {
         id: true, terminationDate: true,
@@ -360,18 +361,57 @@ export class PayrollService {
     const timezone = (await this.settings.getAll())['general.timezone'];
     return this.db.$transaction(async (tx) => {
       await lockPayroll(tx);
+      return this.calculatePeriod(tx, id, operation, actor, meta, timezone);
+    }, { timeout: 30000 });
+  }
+
+  async refreshForAttendance(tx: Tx, employeeId: string, workDate: Date, create: boolean, actor: AuthContext, meta: RequestMeta) {
+    const settings = await this.settings.getAll(tx);
+    const policy = await tx.employeePayPolicy.findFirst({
+      where: { employeeId, effectiveFrom: { lte: workDate }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: workDate } }] },
+      orderBy: { effectiveFrom: 'desc' },
+    });
+    const frequency = policy?.payrollFrequency ?? 'MONTHLY';
+    const existing = await tx.payrollEntry.findFirst({
+      where: { employeeId, periodStart: { lte: workDate }, periodEnd: { gte: workDate } }, include: { period: true },
+    });
+    let period = existing?.period;
+    if (!period && create) {
+      period = await tx.payrollPeriod.findFirst({
+        where: { frequency, status: { not: 'CLOSED' }, startDate: { lte: workDate }, endDate: { gte: workDate } },
+        orderBy: [{ startDate: 'desc' }, { endDate: 'asc' }, { id: 'asc' }],
+      }) ?? undefined;
+      if (!period) {
+        const bounds = resolvePayrollPeriod(frequency, iso(workDate), settings['general.weekStartsOn']);
+        const startDate = parseDateOnly(bounds.start)!;
+        const endDate = parseDateOnly(bounds.end)!;
+        period = await tx.payrollPeriod.upsert({
+          where: { frequency_startDate_endDate: { frequency, startDate, endDate } }, update: {},
+          create: { frequency, startDate, endDate, label: bounds.label, createdById: actor.user.id },
+        });
+      }
+    }
+    if (!period) return { blockers: [] };
+    if (period.status === 'CLOSED') return { blockers: [{ code: 'CLOSED_PERIOD', employeeId,
+      message: 'توجد فترة مغلقة تغطي هذا الدوام. راجع تحديث المستحقات غير المصروفة.' }] };
+    return this.calculatePeriod(tx, period.id, 'calculate', actor, meta, settings['general.timezone'], employeeId);
+  }
+
+  private async calculatePeriod(tx: Tx, id: string, operation: 'calculate' | 'review' | 'approve' | 'close',
+    actor: AuthContext, meta: RequestMeta, timezone: string, onlyEmployeeId?: string) {
       const period = await this.get(id, tx);
       const allowed = { review: 'DRAFT', approve: 'IN_REVIEW', close: 'READY_FOR_APPROVAL' };
       if (period.status === 'CLOSED' || (operation !== 'calculate' && period.status !== allowed[operation])) {
         throw Errors.conflict('حالة الفترة الحالية لا تسمح بهذا الإجراء');
       }
       if (operation === 'close' || operation === 'approve') await this.lockCalculationInputs(tx);
-      const { blockers, calculations } = await this.prepare(tx, period, timezone);
+      const { blockers, calculations } = await this.prepare(tx, period, timezone, undefined, onlyEmployeeId);
       if (operation !== 'calculate' && operation !== 'review' && blockers.length) {
         throw new AppException(ERROR_CODES.CONFLICT, 'عالج موانع اعتماد الفترة أولًا', HttpStatus.CONFLICT, { blockers });
       }
 
-      const previous = new Map(period.entries.map((entry) => [entry.employeeId, entry]));
+      const previous = new Map(period.entries.filter(entry => !onlyEmployeeId || entry.employeeId === onlyEmployeeId)
+        .map((entry) => [entry.employeeId, entry]));
       if (operation === 'close' || operation === 'approve') {
         const changed = previous.size !== calculations.length || calculations.some(({ employeeId, result }) => {
           const entry = previous.get(employeeId);
@@ -429,6 +469,5 @@ export class PayrollService {
       await this.audit.log({ action: `payroll.period.${operation}`, actor, meta, entityType: 'payroll_period', entityId: id,
         before: { status: period.status }, after: { status: data.status ?? period.status, entries: calculations.length, blockers: blockers.length } }, tx);
       return { ...await this.get(id, tx), blockers };
-    }, { timeout: 30000 });
   }
 }
