@@ -44,7 +44,9 @@ function Periods() {
         <div><p className="font-semibold">{period.label}</p>
           <p className="mt-1 text-sm text-muted">{formatDate(period.startDate, 'UTC')} — {formatDate(period.endDate, 'UTC')}</p></div>
         <p className="text-sm">{frequencies[period.frequency]} · {statuses[period.status]} · {period._count?.entries ?? 0} مستحق</p>
-        {period.payout && <p className="text-sm font-semibold">جاهزة للصرف · {period.payout.employees} موظف · {formatMoney(period.payout.remaining, currency)}</p>}
+        <p className="text-sm font-semibold">{period.payout
+          ? `جاهزة للصرف · ${period.payout.employees} موظف · ${formatMoney(period.payout.remaining, currency)}`
+          : { DRAFT: 'يتحدّث الحساب مع اعتماد الدوام', IN_REVIEW: 'راجع موانع الإغلاق', READY_FOR_APPROVAL: 'راجع الحساب وأغلق الفترة للصرف', CLOSED: 'لا توجد دفعات جاهزة الآن' }[period.status]}</p>
       </Link>)}
       <Pagination {...data} onChange={setPage} />
     </Card>}
