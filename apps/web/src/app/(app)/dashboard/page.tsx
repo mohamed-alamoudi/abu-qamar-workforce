@@ -212,11 +212,13 @@ export default function DashboardPage() {
           value={summary && summary.totalPayments !== null ? formatMoney(summary.totalPayments, currency) : null}
         />
         <StatCard
-          label="أجور مستحقة غير مدفوعة"
+          label="أجور جاهزة للصرف"
           icon={Wallet}
           tone="danger"
           loading={loading}
-          note="رصيد قائم حتى الآن من الفترات المغلقة"
+          note={summary?.provisionalWages != null
+            ? `المستحق المبدئي قبل الإغلاق: ${formatMoney(summary.provisionalWages, currency)}`
+            : undefined}
           value={summary && summary.unpaidWages !== null ? formatMoney(summary.unpaidWages, currency) : null}
         />
       </section>

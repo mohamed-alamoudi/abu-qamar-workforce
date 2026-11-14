@@ -45,8 +45,9 @@ export class DashboardService {
 
     let totalPayments: string | null = null;
     let unpaidWages: string | null = null;
+    let provisionalWages: string | null = null;
     if (canFinance) {
-      const [payments, unpaid] = await Promise.all([
+      const [payments, unpaid, provisional] = await this.prisma.$transaction([
         this.prisma.financialTransaction.aggregate({
           where: { type: 'SALARY_PAYMENT', status: 'POSTED', occurredAt: { gte: range.start, lt: range.end } },
           _sum: { amount: true },
@@ -56,11 +57,16 @@ export class DashboardService {
           where: { period: { status: 'CLOSED' } },
           _sum: { netAmount: true, paidAmount: true },
         }),
-      ]);
+        this.prisma.payrollEntry.aggregate({
+          where: { period: { status: { not: 'CLOSED' } } },
+          _sum: { netAmount: true },
+        }),
+      ], { isolationLevel: 'RepeatableRead' });
       totalPayments = payments._sum.amount?.toFixed(2) ?? '0.00';
       const net = unpaid._sum.netAmount;
       const paid = unpaid._sum.paidAmount;
       unpaidWages = net ? net.minus(paid ?? 0).toFixed(2) : '0.00';
+      provisionalWages = provisional._sum.netAmount?.toFixed(2) ?? '0.00';
     }
 
     return {
@@ -72,6 +78,7 @@ export class DashboardService {
       totalWorkedMinutes,
       totalPayments,
       unpaidWages,
+      provisionalWages,
     };
   }
 }

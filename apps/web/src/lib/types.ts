@@ -67,6 +67,7 @@ export interface DashboardSummary {
   totalWorkedMinutes: number | null;
   totalPayments: string | null;
   unpaidWages: string | null;
+  provisionalWages: string | null;
 }
 
 export interface ActiveSession {

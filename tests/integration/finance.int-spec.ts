@@ -202,6 +202,8 @@ describe('محرك الرواتب والحسابات المالية', () => {
     const { id } = await ctx.prisma.payrollPeriod.findFirstOrThrow({ where: { entries: { some: { employeeId } } } });
     const preliminary = (await admin.get('/employees/' + employeeId + '/financial-balances').expect(200)).body;
     expect(amount(preliminary.provisional)).toBe('60.00');
+    expect((await admin.get('/dashboard/summary').expect(200)).body)
+      .toMatchObject({ provisionalWages: '60.00', unpaidWages: '0.00' });
     const entry = await close(id);
     expect(amount(entry.netAmount)).toBe('60.00');
     const payment = await admin.post('/payments', {
@@ -214,6 +216,8 @@ describe('محرك الرواتب والحسابات المالية', () => {
     expect(amount(balance.net)).toBe('60.00');
     expect(amount(balance.paid)).toBe('20.00');
     expect(amount(balance.outstanding)).toBe('40.00');
+    expect((await admin.get('/dashboard/summary').expect(200)).body)
+      .toMatchObject({ provisionalWages: '0.00', unpaidWages: '40.00' });
     const sync = await admin.post('/sync/attendance', { userId: adminId, operations: [{
       action: 'CORRECTION', sessionId: row.id, baseVersion: row.version + 2,
       operationId: randomUUID(), deviceId: randomUUID(), createdAt: new Date().toISOString(),

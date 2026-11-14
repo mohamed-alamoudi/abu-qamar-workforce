@@ -214,6 +214,7 @@ describe('المستخدمون والصلاحيات وسجل التدقيق', ()
           totalWorkedMinutes: 0,
           totalPayments: '0.00',
           unpaidWages: '0.00',
+          provisionalWages: '0.00',
         });
       }
       expect((await admin.get('/dashboard/summary?period=year')).status).toBe(400);
@@ -224,6 +225,7 @@ describe('المستخدمون والصلاحيات وسجل التدقيق', ()
         totalWorkedMinutes: null,
         totalPayments: null,
         unpaidWages: null,
+        provisionalWages: null,
       });
 
       const attendanceOnly = await createSupervisor(ctx, admin, ['attendance.view'], { username: 'supervisor2' });
@@ -232,6 +234,7 @@ describe('المستخدمون والصلاحيات وسجل التدقيق', ()
         totalWorkedMinutes: 0,
         totalPayments: null,
         unpaidWages: null,
+        provisionalWages: null,
       });
     });
 

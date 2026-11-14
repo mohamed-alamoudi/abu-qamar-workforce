@@ -12,7 +12,7 @@ type Balances = {
 };
 
 const labels = {
-  provisional: 'مستحق مبدئي للفترات المفتوحة',
+  provisional: 'مستحق مبدئي قبل الإغلاق',
   gross: 'إجمالي الأجور', net: 'صافي المستحق', paid: 'المدفوع', settled: 'المسوّى',
   outstanding: 'المتبقي للصرف', advances: 'السلف القائمة', debts: 'الديون القائمة',
 } as const;
