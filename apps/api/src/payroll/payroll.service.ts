@@ -96,7 +96,22 @@ export class PayrollService implements OnModuleInit, OnModuleDestroy {
       }),
       this.db.payrollPeriod.count({ where }),
     ]);
-    return paginate(items, total, query);
+    const ready = await this.db.payrollEntry.findMany({
+      where: { periodId: { in: items.filter(item => item.status === 'CLOSED').map(item => item.id) },
+        netAmount: { gt: this.db.payrollEntry.fields.paidAmount } },
+      select: { periodId: true, snapshot: true, netAmount: true, paidAmount: true },
+    });
+    const balances = new Map<string, { employees: number; remaining: Prisma.Decimal }>();
+    for (const row of ready) {
+      if (needsPayrollRefresh(row.snapshot)) continue;
+      const prior = balances.get(row.periodId);
+      balances.set(row.periodId, { employees: (prior?.employees ?? 0) + 1,
+        remaining: row.netAmount.minus(row.paidAmount).plus(prior?.remaining ?? 0) });
+    }
+    return paginate(items.map(item => {
+      const payout = balances.get(item.id);
+      return { ...item, payout: payout ? { employees: payout.employees, remaining: payout.remaining.toFixed(2) } : null };
+    }), total, query);
   }
 
   async get(id: string, tx: Tx = this.db) {

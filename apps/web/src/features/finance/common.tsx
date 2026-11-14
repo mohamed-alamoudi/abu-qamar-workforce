@@ -19,6 +19,7 @@ export type EmployeeSummary = { id: string; code: string; fullName: string };
 export type Period = {
   id: string; label: string; startDate: string; endDate: string;
   frequency: keyof typeof frequencies; status: keyof typeof statuses; _count?: { entries: number };
+  payout?: { employees: number; remaining: string } | null;
 };
 export type Entry = {
   id: string; employee: EmployeeSummary; netAmount: string; grossAmount: string; deductionsAmount: string; paidAmount: string;

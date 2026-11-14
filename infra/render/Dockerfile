@@ -10,4 +10,4 @@ WORKDIR /app
 COPY . .
 RUN corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm build:api
 ENV NODE_ENV=production
-CMD ["sh", "-c", "pnpm db:deploy && pnpm start:api"]
+CMD ["sh", "-c", "DATABASE_URL=\"${DATABASE_URL_UNPOOLED:-$DATABASE_URL}\" pnpm db:deploy && exec node apps/api/dist/main.js"]

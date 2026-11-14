@@ -5,12 +5,14 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Input, Select } from '@abu-qamar/ui';
 import { PageHeader, Pagination } from '@/components/page';
 import { api, errorMessage, toQuery } from '@/lib/api';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatMoney } from '@/lib/format';
+import { useSettings } from '@/hooks/use-settings';
 import { useAuth } from '@/providers/auth-provider';
 import { ActionForm, FinanceAccess, FinanceLinks, frequencies, statuses, useFinanceData, type PageResult, type Period } from '@/features/finance/common';
 
 function Periods() {
   const { user } = useAuth();
+  const currency = useSettings()['general.currency'];
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('');
   const [create, setCreate] = useState(false);
@@ -42,6 +44,7 @@ function Periods() {
         <div><p className="font-semibold">{period.label}</p>
           <p className="mt-1 text-sm text-muted">{formatDate(period.startDate, 'UTC')} — {formatDate(period.endDate, 'UTC')}</p></div>
         <p className="text-sm">{frequencies[period.frequency]} · {statuses[period.status]} · {period._count?.entries ?? 0} مستحق</p>
+        {period.payout && <p className="text-sm font-semibold">جاهزة للصرف · {period.payout.employees} موظف · {formatMoney(period.payout.remaining, currency)}</p>}
       </Link>)}
       <Pagination {...data} onChange={setPage} />
     </Card>}
