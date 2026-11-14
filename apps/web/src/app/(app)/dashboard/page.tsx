@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { can, canAny, DASHBOARD_PERIODS, type DashboardPeriod } from '@abu-qamar/shared';
 import { Alert, Card, cn } from '@abu-qamar/ui';
 import { PageHeader } from '@/components/page';
+import { useResource } from '@/features/attendance/shared';
 import { usePersistedState } from '@/hooks/use-persisted-state';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate, formatDuration, formatMoney, formatNumber } from '@/lib/format';
@@ -77,6 +78,10 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const openShifts = useResource<{ total: number }>(canAny(user, ['attendance.view', 'attendance.check_in', 'attendance.check_out'])
+    ? '/attendance/open?pageSize=1' : null);
+  const reviewShifts = useResource<{ total: number }>(can(user, 'attendance.view')
+    ? '/attendance?status=CLOSED&approvalStatus=IN_REVIEW&pageSize=1' : null);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,9 +114,9 @@ export default function DashboardPage() {
     : '';
 
   const actions = [
-    { href: '/employees?new=1', label: 'إضافة موظف', icon: UserPlus, show: can(user, 'employees.create') },
     { href: '/attendance#quick-check-in', label: 'تسجيل حضور', icon: LogIn, show: can(user, 'attendance.check_in') },
     { href: '/attendance#quick-check-out', label: 'تسجيل انصراف', icon: LogOut, show: can(user, 'attendance.check_out') },
+    { href: '/employees?new=1', label: 'إضافة موظف', icon: UserPlus, show: can(user, 'employees.create') },
     { href: '/payroll', label: 'عرض الرواتب', icon: Wallet, show: user?.role === 'ADMIN' },
     {
       href: '/reports',
@@ -124,7 +129,7 @@ export default function DashboardPage() {
   return (
     <>
       <PageHeader
-        title={`مرحبًا، ${user?.fullName ?? ''}`}
+        title="اليوم"
         description={rangeText ? `ملخص الفترة: ${rangeText}` : 'ملخص العمل'}
         actions={
           <div role="group" aria-label="اختيار الفترة" className="inline-flex rounded-lg border border-line bg-surface p-1">
@@ -148,6 +153,19 @@ export default function DashboardPage() {
 
       {error && <Alert className="mb-4">{error}</Alert>}
 
+      {actions.length > 0 && (
+        <section aria-label="إجراءات سريعة" className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {actions.map((action) => <QuickAction key={action.href} {...action} />)}
+        </section>
+      )}
+      {(openShifts.data || reviewShifts.data) && <div className="mb-4 flex flex-wrap gap-3 text-sm">
+        {openShifts.data && <Link className="rounded-lg border border-line bg-surface p-3 underline" href="/attendance#quick-check-out">
+          الورديات المفتوحة · {formatNumber(openShifts.data.total)}
+        </Link>}
+        {reviewShifts.data && <Link className="rounded-lg border border-line bg-surface p-3 underline" href="/attendance#review">
+          دوام قيد المراجعة · {formatNumber(reviewShifts.data.total)}
+        </Link>}
+      </div>}
       <section aria-label="المؤشرات" className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
         <StatCard
           label="الموظفون الذين عملوا"
@@ -180,18 +198,6 @@ export default function DashboardPage() {
         />
       </section>
 
-      {actions.length > 0 && (
-        <section aria-labelledby="quick-actions" className="mt-8">
-          <h2 id="quick-actions" className="mb-3 text-base font-semibold">
-            إجراءات سريعة
-          </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {actions.map((a) => (
-              <QuickAction key={a.label} href={a.href} label={a.label} icon={a.icon} />
-            ))}
-          </div>
-        </section>
-      )}
     </>
   );
 }

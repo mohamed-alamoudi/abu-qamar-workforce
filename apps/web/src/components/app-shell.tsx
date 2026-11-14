@@ -448,7 +448,7 @@ function AccountMenu({ user, onLogout }: { user: SessionUser; onLogout: () => vo
 
 function BottomNav({ items, onMore }: { items: NavItem[]; onMore: () => void }) {
   const pathname = usePathname();
-  const primary = items.filter((i) => i.primary).slice(0, 3);
+  const primary = ['/dashboard', '/attendance', '/employees'].flatMap(href => items.filter(item => item.primary && item.href === href));
   const moreActive = !primary.some((i) => isActive(pathname, i.href));
   const cell = 'flex min-h-16 flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium';
   return (
@@ -467,7 +467,7 @@ function BottomNav({ items, onMore }: { items: NavItem[]; onMore: () => void }) 
             className={cn(cell, active ? 'text-brand-600 dark:text-brand-300' : 'text-muted')}
           >
             <Icon className="size-6" />
-            {item.label}
+            {item.href === '/attendance' ? 'الدوام' : item.label}
           </Link>
         );
       })}

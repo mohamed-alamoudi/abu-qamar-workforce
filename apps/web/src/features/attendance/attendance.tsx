@@ -48,12 +48,19 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     };
   }, [user?.id, refresh]);
   const [selected, setSelected] = useState('');
+  const [section, setSection] = useState<'record' | 'review' | 'history'>('record');
+  const [showTime, setShowTime] = useState(false);
   const [staffSearch, setStaffSearch] = useState('');
   const [historySearch, setHistorySearch] = useState('');
   const [department, setDepartment] = useState('');
   const [quickArrival, setQuickArrival] = useState('');
   const [quickDeparture, setQuickDeparture] = useState('');
   const [filter, setFilter] = useState({ employeeId: '', departmentId: '', from: '', to: '', status: '', approvalStatus: '' });
+  useEffect(() => {
+    if (!quick || !view || window.location.hash !== '#review') return;
+    setSection('review');
+    setFilter(current => ({ ...current, status: 'CLOSED', approvalStatus: 'IN_REVIEW' }));
+  }, [quick, view]);
   const [page, setPage] = useState(1);
   const [openPage, setOpenPage] = useState(1);
   const [dialog, setDialog] = useState<{ kind: 'manual' | 'correct' | 'void' | 'history'; row?: Session } | null>(null);
@@ -137,9 +144,17 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   if (!view && (!quick || (!checkIn && !checkOut && !correct))) return <p className="text-muted">ليست لديك صلاحية عرض سجلات الدوام.</p>;
 
   return <div className="space-y-5">
+    {quick && view && <nav aria-label="أقسام الدوام" className="flex flex-wrap gap-2">
+      {([['record', 'التسجيل'], ['review', 'المراجعة'], ['history', 'السجل']] as const).map(([key, label]) =>
+        <Button key={key} aria-pressed={section === key} variant={section === key ? 'primary' : 'secondary'} onClick={() => {
+          setSection(key);
+          setPage(1);
+          setFilter(current => ({ ...current, status: key === 'review' ? 'CLOSED' : '', approvalStatus: key === 'review' ? 'IN_REVIEW' : '' }));
+        }}>{label}</Button>)}
+    </nav>}
     <Feedback {...feedback} />
     <Feedback error={staff.error ?? departments.error} />
-    {quick && <section id="quick-check-in"><Card className="space-y-4 p-4">
+    {quick && section === 'record' && <section id="quick-check-in"><Card className="space-y-4 p-4">
       <h2 className="text-lg font-semibold">التسجيل السريع</h2>
       {offlineReady && process.env.NODE_ENV === 'production' && <p className="text-sm text-muted">حُفظت بيانات التسجيل لهذا الجهاز. عند انقطاع الاتصال افتح التطبيق للوصول إلى شاشة الدوام المحلية.</p>}
       {(checkIn || correct) && <div className="grid gap-3 sm:grid-cols-2">
@@ -148,7 +163,13 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
           value={activeSelection} onChange={setSelected} required />
         <DepartmentSelect departments={availableDepartments.filter(row => row.isActive)} value={department} onChange={setDepartment} />
       </div>}
-      {(checkIn || checkOut) && <div className="grid gap-3 sm:grid-cols-2">
+      {(checkIn || checkOut) && <Button variant="ghost" aria-expanded={showTime} onClick={() => {
+        if (showTime) { setQuickArrival(''); setQuickDeparture(''); }
+        setShowTime(!showTime);
+      }}>
+        {showTime ? 'طي حقول التاريخ والوقت' : 'تحديد التاريخ والوقت'}
+      </Button>}
+      {(checkIn || checkOut) && showTime && <div className="grid gap-3 sm:grid-cols-2">
         {checkIn && <Input label="وقت الحضور (اختياري)" type="datetime-local" value={quickArrival} onChange={e => setQuickArrival(e.target.value)} />}
         {checkOut && <Input label="وقت الانصراف (اختياري)" type="datetime-local" value={quickDeparture} onChange={e => setQuickDeparture(e.target.value)} />}
         <p className="text-sm text-muted">التوقيت حسب النظام ({zone}). اترك الحقل فارغًا للتسجيل بالوقت الحالي.</p>
@@ -173,7 +194,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
         {admin && <Link className="underline" href="/attendance/overtime">العمل الإضافي</Link>}
       </div>}
     </Card></section>}
-    {quick && (view || checkIn || checkOut) && <section id="quick-check-out"><Card className="space-y-3 p-4">
+    {quick && section === 'record' && (view || checkIn || checkOut) && <section id="quick-check-out"><Card className="space-y-3 p-4">
       <h2 className="text-lg font-semibold">الورديات المفتوحة</h2>
       <Feedback error={open.error} />
       {open.loading && <p role="status">جارٍ تحميل الورديات المفتوحة…</p>}
@@ -198,13 +219,14 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
       })}
       {!!open.data?.total && <Pagination total={open.data.total} page={openPage} totalPages={Math.ceil(open.data.total / 20)} onChange={setOpenPage} />}
     </Card></section>}
-    {view && <Card className="space-y-4 p-4">
+    {view && (!quick || section !== 'record') && <Card className="space-y-4 p-4">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-lg font-semibold">سجلات الدوام</h2>
-        <Button variant="secondary" onClick={() => {
+        {section !== 'review' && <Button variant="secondary" onClick={() => {
+          if (quick) setSection('review');
           setFilter(current => ({ ...current, status: 'CLOSED', approvalStatus: 'IN_REVIEW' }));
           setPage(1);
-        }}>قائمة المراجعة</Button>
+        }}>قائمة المراجعة</Button>}
         <Button variant="ghost" onClick={() => {
           setFilter({ employeeId: '', departmentId: '', from: '', to: '', status: '', approvalStatus: '' }); setPage(1);
         }}>مسح الفلاتر</Button>
@@ -230,6 +252,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
         </Select>
       </div>
       {(correct || admin) && <div className="space-y-2 border-t border-line pt-3">
+        {section === 'review' && !list.loading && list.data && <p className="text-sm">السجلات المطابقة للفلاتر · {list.data.total}</p>}
         <div className="flex flex-wrap gap-2">
           {correct && <Button variant="secondary" disabled={busy} onClick={() => void bulkTransition('review')}>
             إرسال الكل للمراجعة

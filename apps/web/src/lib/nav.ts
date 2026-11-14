@@ -18,7 +18,7 @@ export interface NavItem {
  * إخفاء العناصر هنا لتحسين التجربة فقط — الحماية الفعلية مفروضة في الخادم.
  */
 export const NAV_ITEMS: NavItem[] = [
-  { href: '/dashboard', label: 'لوحة التحكم', icon: 'dashboard', primary: true },
+  { href: '/dashboard', label: 'اليوم', icon: 'dashboard', primary: true },
   {
     href: '/employees',
     label: 'الموظفون',

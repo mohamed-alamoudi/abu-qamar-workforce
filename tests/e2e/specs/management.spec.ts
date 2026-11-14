@@ -94,6 +94,7 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
   const queue = page.locator('details').filter({ hasText: 'مزامنة الدوام' });
   await queue.locator('summary').click();
   await expect(queue.getByText('تمت المزامنة', { exact: true })).toHaveCount(3);
+  await page.getByRole('button', { name: 'السجل', exact: true }).click();
   const shifts = page.getByRole('article').filter({ has: page.getByRole('heading', { name: new RegExp(employee) }) });
   await expect(shifts).toHaveCount(2);
   await expect(shifts.filter({ hasText: /الحضور 2025-01-15 08:00.*الانصراف 2025-01-15 10:00/ })).toHaveCount(1);
