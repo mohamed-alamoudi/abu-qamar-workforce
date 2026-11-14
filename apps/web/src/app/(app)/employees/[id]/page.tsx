@@ -598,6 +598,7 @@ export default function EmployeeProfilePage() {
 
   useEffect(() => {
     load();
+    if (window.location.hash === '#finance') setTab('finance');
   }, [load]);
 
   const back = (

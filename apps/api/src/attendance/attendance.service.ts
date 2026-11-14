@@ -298,18 +298,18 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
     });
     let updated = 0;
     let skipped = 0;
-    const payrollWarnings = new Set<string>();
+    const payrollWarnings = new Map<string, { employeeId: string; message: string }>();
     for (const candidate of candidates) {
       try {
         const result = await this.transition(candidate.id, action, candidate.version, actor, meta);
-        result.payrollWarnings?.forEach(message => payrollWarnings.add(message));
+        result.payrollWarnings?.forEach(warning => payrollWarnings.set(warning.employeeId + warning.message, warning));
         updated++;
       } catch (error) {
         if (!(error instanceof AppException) || ![404, 409].includes(error.getStatus())) throw error;
         skipped++;
       }
     }
-    return { updated, skipped, ...(payrollWarnings.size ? { payrollWarnings: [...payrollWarnings] } : {}) };
+    return { updated, skipped, ...(payrollWarnings.size ? { payrollWarnings: [...payrollWarnings.values()] } : {}) };
   }
 
   async transition(id: string, action: 'review' | 'approve' | 'void', version: number, actor: AuthContext, meta: RequestMeta, reason?: string) {
@@ -337,7 +337,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       await this.log(tx, action, actor, meta, after, row);
       const payroll = action === 'approve' ? await this.payroll.refreshForAttendance(tx, row.employeeId, row.workDate, true, actor, meta) : null;
       return { ...after, payrollWarnings: payroll?.blockers.filter(item => ['NO_RATE', 'CLOSED_PERIOD', 'PAYROLL_OVERLAP'].includes(item.code))
-        .map(item => row.employee.fullName + ' · ' + item.message) };
+        .map(item => ({ employeeId: row.employeeId, message: row.employee.fullName + ' · ' + item.message })) };
     }, { timeout: 30_000 });
   }
 
