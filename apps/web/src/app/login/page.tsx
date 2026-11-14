@@ -50,11 +50,14 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
+      await api.get('/health', { silentAuth: true });
       establish(await api.post<SessionInfo>('/auth/login', parsed.data, { silentAuth: true }));
       router.replace(safeNext());
     } catch (err) {
       if (err instanceof ApiError && err.code === 'TOTP_REQUIRED') {
         setNeedsTotp(true);
+      } else if (err instanceof ApiError && (err.status === 0 || err.status >= 500)) {
+        setError('تعذّر الاتصال بالخادم. إذا كان الموقع خاملًا، انتظر دقيقة واضغط دخول مرة ثانية.');
       } else {
         setError(errorMessage(err));
       }

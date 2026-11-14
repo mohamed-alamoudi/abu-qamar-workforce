@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, HttpCode, Module, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Module, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { AdminOnly, Auth, Meta, RequireReauth } from '../common/auth/decorators';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
@@ -25,6 +25,13 @@ class BackupsController {
   @Post()
   create(@Auth() auth: AuthContext, @Meta() meta: RequestMeta) {
     return this.backups.create('MANUAL', auth, meta);
+  }
+
+  @Post('reset-workers')
+  @HttpCode(200)
+  @RequireReauth()
+  resetWorkers(@Body('confirmation') confirmation: unknown, @Auth() auth: AuthContext, @Meta() meta: RequestMeta) {
+    return this.backups.resetWorkers(confirmation, auth, meta);
   }
 
   @Get(':id/preview')

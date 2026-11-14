@@ -156,7 +156,7 @@ function Details({ id }: { id: string }) {
     </Card>)}</div>
     {payment && <ActionForm title={`دفعة راتب · ${payment.employee.fullName}`} path="/payments" idempotent
       onSaved={reload} onClose={() => setPayment(null)} transform={(body) => ({ ...body, payrollEntryId: payment.id })}>
-      <MoneyFields cash />
+      <MoneyFields cash defaultAmount={(Number(payment.netAmount) - Number(payment.paidAmount)).toFixed(2)} />
     </ActionForm>}
     {confirmClose && <ActionForm title="تأكيد إغلاق فترة الرواتب" path={`${periodPath}/close`} onSaved={reload} onClose={() => setConfirmClose(false)}>
       <p>يُثبّت الإغلاق مبالغ الرواتب وبنودها. يمكن تسجيل الدفعات وتسوية المستحقات بعده.</p>

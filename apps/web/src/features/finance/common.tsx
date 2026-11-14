@@ -112,9 +112,9 @@ export function ActionForm<T = unknown>({ title, path, idempotent = false, child
   </Modal>;
 }
 
-export function MoneyFields({ cash = false, signed = false }: { cash?: boolean; signed?: boolean }) {
+export function MoneyFields({ cash = false, signed = false, defaultAmount }: { cash?: boolean; signed?: boolean; defaultAmount?: string }) {
   return <>
-    <Input label="المبلغ" name="amount" required type="text" inputMode="decimal" dir="ltr"
+    <Input label="المبلغ" name="amount" required type="text" inputMode="decimal" dir="ltr" defaultValue={defaultAmount}
       pattern={signed ? '-?[0-9]{1,10}(\\.[0-9]{1,2})?' : '[0-9]{1,10}(\\.[0-9]{1,2})?'} />
     {cash && <>
       <Select label="طريقة الدفع" name="method" required>

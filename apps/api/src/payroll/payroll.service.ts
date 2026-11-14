@@ -90,6 +90,34 @@ export class PayrollService {
     });
   }
 
+  async prepareCurrent(actor: AuthContext, meta: RequestMeta) {
+    if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
+    return this.db.$transaction(async tx => {
+      await lockPayroll(tx);
+      const settings = await this.settings.getAll(tx);
+      const today = todayInZone(settings['general.timezone']);
+      const policies = await tx.employeePayPolicy.findMany({
+        where: { employee: { status: 'ACTIVE' }, effectiveFrom: { lte: today },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }] },
+        distinct: ['payrollFrequency'], select: { payrollFrequency: true },
+      });
+      for (const { payrollFrequency: frequency } of policies) {
+        const existing = await tx.payrollPeriod.findFirst({
+          where: { frequency, startDate: { lte: today }, endDate: { gte: today } },
+          orderBy: [{ startDate: 'desc' }, { endDate: 'asc' }, { id: 'asc' }],
+        });
+        if (existing && (existing.status === 'CLOSED' || existing.status === 'READY_FOR_APPROVAL')) continue;
+        const bounds = resolvePayrollPeriod(frequency, iso(today), settings['general.weekStartsOn']);
+        const period = existing ?? await tx.payrollPeriod.create({ data: {
+          frequency, startDate: parseDateOnly(bounds.start)!, endDate: parseDateOnly(bounds.end)!,
+          label: bounds.label, createdById: actor.user.id,
+        } });
+        await this.calculatePeriod(tx, period.id, 'calculate', actor, meta, settings['general.timezone']);
+      }
+      return { ok: true };
+    }, { timeout: 30_000 });
+  }
+
   async remove(id: string, actor: AuthContext, meta: RequestMeta) {
     if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
     return this.db.$transaction(async tx => {

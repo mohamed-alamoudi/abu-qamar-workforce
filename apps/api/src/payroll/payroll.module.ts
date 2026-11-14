@@ -41,6 +41,11 @@ class PayrollController {
     return this.periods.create(dto, actor, meta);
   }
 
+  @Post('periods/prepare-current')
+  prepareCurrent(@Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+    return this.periods.prepareCurrent(actor, meta);
+  }
+
   @Post('periods/:id/reopen')
   @RequireReauth()
   reopen(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ReopenPeriodDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {

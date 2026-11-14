@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Input, Select } from '@abu-qamar/ui';
 import { PageHeader, Pagination } from '@/components/page';
-import { toQuery } from '@/lib/api';
+import { api, errorMessage, toQuery } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
 import { ActionForm, FinanceAccess, FinanceLinks, frequencies, statuses, useFinanceData, type PageResult, type Period } from '@/features/finance/common';
@@ -14,9 +14,18 @@ function Periods() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('');
   const [create, setCreate] = useState(false);
+  const [prepareError, setPrepareError] = useState('');
   const { data, error, reload } = useFinanceData<PageResult<Period>>(`/payroll/periods${toQuery({ page, status })}`);
+  const admin = user?.role === 'ADMIN';
+  useEffect(() => {
+    if (!admin || !navigator.onLine) return;
+    let active = true;
+    void api.post('/payroll/periods/prepare-current').then(() => { if (active) reload(); })
+      .catch(error => { if (active) setPrepareError(errorMessage(error)); });
+    return () => { active = false; };
+  }, [admin, reload]);
   return <>
-    <PageHeader title="فترات الرواتب" actions={user?.role === 'ADMIN' && <Button onClick={() => setCreate(true)}>إنشاء فترة</Button>} />
+    <PageHeader title="فترات الرواتب" actions={admin && <Button variant="secondary" onClick={() => setCreate(true)}>إنشاء فترة مخصصة</Button>} />
     <FinanceLinks />
     <div className="mb-4 max-w-xs">
       <Select label="الحالة" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
@@ -24,7 +33,7 @@ function Periods() {
         {Object.entries(statuses).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
       </Select>
     </div>
-    {error && <Alert>{error}</Alert>}
+    {(error || prepareError) && <Alert>{error || prepareError}</Alert>}
     {!data && !error && <p className="text-muted">جارٍ تحميل الفترات…</p>}
     {data && <Card>
       {data.items.length === 0 && <p className="p-4 text-muted">لا توجد فترات رواتب</p>}

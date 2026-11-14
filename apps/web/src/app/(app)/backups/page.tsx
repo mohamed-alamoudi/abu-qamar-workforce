@@ -36,6 +36,8 @@ export default function BackupsPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [restored, setRestored] = useState(false);
+  const [reset, setReset] = useState(false);
+  const [confirmation, setConfirmation] = useState('');
 
   useEffect(() => {
     void api.get<BackupList>('/backups').then(setList).catch((failure) => setError(errorMessage(failure)));
@@ -63,18 +65,50 @@ export default function BackupsPage() {
       {restored ? <a className="underline" href="/login">تسجيل الدخول من جديد</a> : (
         <>
           {list && !list.configured && <p>النسخ الاحتياطي غير مهيأ في إعدادات الخادم.</p>}
+          <div className="flex flex-wrap gap-2">
           <button className={button} disabled={busy || !list?.configured} onClick={() => void perform(async () => {
             await api.post('/backups');
             setList(await api.get<BackupList>('/backups'));
             setMessage('أُنشئت النسخة الاحتياطية.');
-          })}>إنشاء نسخة يدوية</button>
+          })}>أخذ نسخة</button>
+          <a className={button} href="#saved-backups">استرداد نسخة محفوظة</a>
+          <button className={button + ' text-red-600'} disabled={busy || !list?.configured}
+            onClick={() => { setConfirmation(''); setReset(true); }}>تصفير بيانات العمال</button>
+          </div>
+          {reset && <form className="space-y-3 rounded-lg border p-4" onSubmit={event => {
+            event.preventDefault();
+            void perform(async () => {
+              const result = await api.post<{ employees: number }>('/backups/reset-workers', { confirmation });
+              setReset(false);
+              setPreview(undefined);
+              setMessage(`تم تصفير بيانات ${result.employees} موظف. أُنشئت نسخة أمان قبل التصفير.`);
+              setList(await api.get<BackupList>('/backups'));
+            });
+          }}>
+            <p>سيُحذف العمال ودوامهم ورواتبهم ودفعاتهم وسلفهم وديونهم بعد أخذ نسخة أمان. تبقى حسابات الدخول والأقسام والإعدادات وسجل التدقيق.</p>
+            <label className="block">اكتب «تصفير بيانات العمال» للتأكيد
+              <input className="mt-2 block rounded border bg-surface p-2" value={confirmation} onChange={event => setConfirmation(event.target.value)} required />
+            </label>
+            <button className={button + ' text-red-600'} disabled={busy || confirmation !== 'تصفير بيانات العمال'}>تأكيد التصفير</button>
+            <button type="button" className={button} disabled={busy} onClick={() => setReset(false)}>إلغاء</button>
+          </form>}
           {list?.items.length === 0 && <p>لا توجد نسخ احتياطية.</p>}
-          <ul className="grid gap-3 md:grid-cols-2">
+          <ul id="saved-backups" className="grid gap-3 md:grid-cols-2">
             {list?.items.map((item) => (
               <li key={item.id} className="space-y-2 rounded-lg border p-4">
                 <h2 className="font-bold">{types[item.type]} · {statuses[item.status]}</h2>
                 <p>{new Date(item.startedAt).toLocaleString('ar')}</p>
                 {item.errorMessage && <p>{item.errorMessage}</p>}
+                {item.type === 'MANUAL' && !['IN_PROGRESS', 'EXPIRED'].includes(item.status) &&
+                  <button className={button + ' text-red-600'} disabled={busy} onClick={() => {
+                    if (!window.confirm('حذف ملف هذه النسخة الاحتياطية؟')) return;
+                    void perform(async () => {
+                      await api.delete('/backups/' + item.id);
+                      if (preview?.id === item.id) setPreview(undefined);
+                      setList(await api.get<BackupList>('/backups'));
+                      setMessage('حُذف ملف النسخة الاحتياطية.');
+                    });
+                  }}>حذف النسخة</button>}
                 {(item.status === 'COMPLETED' || item.status === 'VERIFIED') && (
                   <button className={button} disabled={busy} onClick={() => void perform(async () => {
                     setPreview({ id: item.id, data: await api.get<Preview>('/backups/' + item.id + '/preview') });

@@ -268,7 +268,9 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
           {correct && <Button variant="secondary" disabled={busy} onClick={() => void bulkTransition('review')}>
             إرسال الكل للمراجعة
           </Button>}
-          {admin && <Button disabled={busy} onClick={() => void bulkTransition('approve')}>اعتماد الكل</Button>}
+          {admin && <Button disabled={busy} onClick={() => {
+            if (window.confirm('اعتماد جميع الورديات المؤهلة ضمن الموظف والقسم والتواريخ المحددة؟')) void bulkTransition('approve');
+          }}>اعتماد الكل</Button>}
         </div>
         <p className="text-sm text-muted">يشمل الإجراء الورديات المغلقة المؤهلة عبر كل الصفحات حسب الموظف والقسم والتواريخ المحددة.</p>
       </div>}

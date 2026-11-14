@@ -85,7 +85,7 @@ export class MaintenanceRequestInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler) {
     const req = context.switchToHttp().getRequest<Request>();
     if (req.path === '/health') return next.handle();
-    if (req.method === 'POST' && /^\/backups\/[^/]+\/restore\/?$/.test(req.path)) return next.handle();
+    if (req.method === 'POST' && /^\/backups\/(?:[^/]+\/restore|reset-workers)\/?$/.test(req.path)) return next.handle();
     const release = this.maintenance.trackRequest();
     return next.handle().pipe(finalize(release));
   }

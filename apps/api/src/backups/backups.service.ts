@@ -274,6 +274,37 @@ export class BackupsService {
   }
 
   /** للمهمة المجدولة: نسخة واحدة في اليوم المحلي (أسبوعية أول الأسبوع ويومية غير ذلك)، ثم تنظيف المنتهية. */
+  async resetWorkers(confirmation: unknown, actor: AuthContext, meta: RequestMeta) {
+    if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
+    if (confirmation !== 'تصفير بيانات العمال') throw Errors.validation('اكتب عبارة التأكيد كما تظهر على الشاشة');
+    return this.exclusive(async () => {
+      if (!this.maintenance.enter('reset-workers')) throw Errors.conflict('النظام في وضع الصيانة مسبقًا');
+      try {
+        await this.maintenance.drainRequests();
+        const safety = await this.createInternal('PRE_RESTORE', actor, meta);
+        return await this.prisma.$transaction(async tx => {
+          const employees = await tx.employee.count();
+          const overtimeDefaults = await tx.overtimePolicy.findMany({ where: { employeeId: null } });
+          await tx.$executeRaw`TRUNCATE TABLE
+            settlement_allocations, debt_movements, financial_transactions, advance_accounts, debt_accounts,
+            payroll_adjustments, payroll_entry_components, payroll_entries, payroll_periods,
+            attendance_operations, attendance_corrections, attendance_approvals, work_breaks, overtime_entries,
+            overtime_policies, leave_records, work_sessions, schedule_shifts, employee_schedules,
+            employee_pay_policies, pay_rates, employee_department_history, sync_operations, employees`;
+          if (overtimeDefaults.length) await tx.overtimePolicy.createMany({ data: overtimeDefaults });
+          await tx.notification.deleteMany({ where: { type: { in: [
+            'MISSING_CHECKOUT', 'ATTENDANCE_CONFLICT', 'LEAVE_PENDING', 'OVERTIME_PENDING', 'PAYROLL_READY_FOR_REVIEW', 'SYNC_FAILED',
+          ] } } });
+          await this.audit.log({ action: 'backup.worker_data_reset', actor, meta, entityType: 'backup',
+            entityId: safety.record.id, metadata: { employees } }, tx);
+          return { employees, safetyBackupId: safety.record.id };
+        }, { timeout: 30_000 });
+      } finally {
+        this.maintenance.exit();
+      }
+    });
+  }
+
   async runScheduled(now = new Date()) {
     return this.exclusive(async () => {
       const settings = await this.settings.getAll();
