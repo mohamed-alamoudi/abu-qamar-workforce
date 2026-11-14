@@ -72,6 +72,11 @@ export default function BackupsPage() {
             setMessage('أُنشئت النسخة الاحتياطية.');
           })}>أخذ نسخة</button>
           <a className={button} href="#saved-backups">استرداد نسخة محفوظة</a>
+          <button className={button} disabled={busy || !list?.configured} onClick={() => void perform(async () => {
+            const result = await api.post<{ imported: number; rejected: number }>('/backups/import');
+            setList(await api.get<BackupList>('/backups'));
+            setMessage(`استُوردت ${result.imported} نسخة من التخزين · رُفضت ${result.rejected} نسخة.`);
+          })}>استيراد من التخزين</button>
           <button className={button + ' text-red-600'} disabled={busy || !list?.configured}
             onClick={() => { setConfirmation(''); setReset(true); }}>تصفير بيانات العمال</button>
           </div>
@@ -133,7 +138,7 @@ export default function BackupsPage() {
               <div className="flex flex-wrap gap-2">
                 <button className={button} disabled={busy} onClick={() => setPreview(undefined)}>إغلاق</button>
                 <button className={button} disabled={busy || !preview.data.schema.compatible} onClick={() => {
-                  if (!window.confirm('ستُستبدل البيانات الحالية بمحتوى النسخة بعد إنشاء نسخة أمان. هل تريد المتابعة؟')) return;
+                  if (!window.confirm('سيُسترد محتوى النسخة الكامل، بما فيه حسابات الدخول وقت أخذ النسخة، بعد إنشاء نسخة أمان. هل تريد المتابعة؟')) return;
                   void perform(async () => {
                     await api.post('/backups/' + preview.id + '/restore');
                     setRestored(true);

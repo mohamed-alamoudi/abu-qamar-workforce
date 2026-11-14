@@ -663,6 +663,11 @@ export class BackupsService {
           known++;
           continue;
         }
+        const file = await this.storage.get(manifest.storageKey);
+        if (file.length !== manifest.sizeBytes || sha256Buffer(file) !== manifest.checksumSha256) {
+          throw new BackupIntegrityError('ملف النسخة لا يطابق البيان الموقّع');
+        }
+        await this.pgTools.listContents(decryptBackup(file, encryptionKey));
         const createdAt = new Date(manifest.createdAt);
         const data = {
           type: manifest.type,

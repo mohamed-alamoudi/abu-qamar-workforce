@@ -34,6 +34,13 @@ class BackupsController {
     return this.backups.resetWorkers(confirmation, auth, meta);
   }
 
+  @Post('import')
+  @HttpCode(200)
+  @RequireReauth()
+  importSaved(@Auth() auth: AuthContext, @Meta() meta: RequestMeta) {
+    return this.backups.rescan(auth, meta);
+  }
+
   @Get(':id/preview')
   preview(@Param('id', ParseUUIDPipe) id: string) {
     return this.backups.preview(id);
