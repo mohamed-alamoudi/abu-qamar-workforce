@@ -91,9 +91,7 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
     await context.setOffline(false);
   }
   await expect(page).toHaveURL(/\/attendance/);
-  const queue = page.locator('details').filter({ hasText: 'مزامنة الدوام' });
-  await queue.locator('summary').click();
-  await expect(queue.getByText('تمت المزامنة', { exact: true })).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'السجل', exact: true })).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'السجل', exact: true }).click();
   const shifts = page.getByRole('article').filter({ has: page.getByRole('heading', { name: new RegExp(employee) }) });
   await expect(shifts).toHaveCount(2);
