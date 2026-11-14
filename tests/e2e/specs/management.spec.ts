@@ -64,7 +64,7 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
   const quick = page.locator('#quick-check-in');
   const chooseEmployee = async () => {
     await page.getByLabel('بحث عن موظف بالاسم أو الكود').fill(suffix);
-    await page.getByRole('button', { name: new RegExp(employee) }).click();
+    await page.getByRole('list', { name: 'نتائج البحث عن موظف' }).getByRole('button', { name: new RegExp(employee) }).click();
   };
   await chooseEmployee();
   await expect(quick.getByLabel('بحث عن موظف بالاسم أو الكود')).toHaveValue(employee);
