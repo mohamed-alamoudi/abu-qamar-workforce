@@ -137,7 +137,7 @@ test('الأدمن ينشئ نسخة يدوية ويعاين سلامتها', as
   test.skip(process.env.E2E_BACKUPS !== '1', 'فعّل E2E_BACKUPS بعد تهيئة تخزين وأدوات النسخ محليًا');
   await page.goto('/backups');
   await expect(page.getByRole('heading', { name: 'النسخ الاحتياطية' })).toBeVisible();
-  await page.getByRole('button', { name: 'إنشاء نسخة يدوية' }).click();
+  await page.getByRole('button', { name: 'أخذ نسخة', exact: true }).click();
   await expect(page.getByText('أُنشئت النسخة الاحتياطية.')).toBeVisible();
   await page.getByRole('button', { name: 'فحص النسخة ومعاينتها' }).first().click();
   await expect(page.getByText('تم التحقق من سلامة الملف. الإصدار مطابق.')).toBeVisible();

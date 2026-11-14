@@ -158,14 +158,17 @@ export default function DashboardPage() {
           {actions.map((action) => <QuickAction key={action.href} {...action} />)}
         </section>
       )}
-      {(openShifts.data || reviewShifts.data) && <div className="mb-4 flex flex-wrap gap-3 text-sm">
+      {(openShifts.data || reviewShifts.data) && <section aria-labelledby="attention-title" className="mb-4">
+        <h2 id="attention-title" className="mb-2 font-semibold">بحاجة إلى انتباه</h2>
+        <div className="flex flex-wrap gap-3 text-sm">
         {openShifts.data && <Link className="rounded-lg border border-line bg-surface p-3 underline" href="/attendance#quick-check-out">
           الورديات المفتوحة · {formatNumber(openShifts.data.total)}
         </Link>}
         {reviewShifts.data && <Link className="rounded-lg border border-line bg-surface p-3 underline" href="/attendance#review">
           دوام قيد المراجعة · {formatNumber(reviewShifts.data.total)}
         </Link>}
-      </div>}
+        </div>
+      </section>}
       <section aria-label="المؤشرات" className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
         <StatCard
           label="الموظفون الذين عملوا"
