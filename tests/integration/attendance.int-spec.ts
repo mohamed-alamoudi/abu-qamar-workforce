@@ -49,6 +49,8 @@ describe('الحضور والانصراف', () => {
     await admin.post('/attendance/bulk/approve', scope).expect(201, { updated: 0, skipped: 0 });
     await supervisor.client.post('/attendance/bulk/review', scope).expect(201, { updated: 21, skipped: 0 });
     await supervisor.client.post('/attendance/bulk/approve', scope).expect(403);
+    await supervisor.client.post('/attendance/bulk/approve/preview', scope).expect(403);
+    await admin.post('/attendance/bulk/approve/preview', scope).expect(201, { ready: 21, needsReview: 1 });
     await admin.post('/attendance/bulk/approve', scope).expect(201, { updated: 21, skipped: 0 });
     await admin.post('/attendance/bulk/approve', scope).expect(201, { updated: 0, skipped: 0 });
     expect(await ctx.prisma.workSession.count({ where: { approvalStatus: 'APPROVED', version: 3 } })).toBe(21);

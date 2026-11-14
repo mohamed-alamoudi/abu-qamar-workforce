@@ -126,6 +126,10 @@ export class BackupsService {
     return key;
   }
 
+  private get toolsDatabaseUrl(): string {
+    return process.env.DATABASE_URL_UNPOOLED || this.config.databaseUrl;
+  }
+
   private async exclusive<T>(work: () => Promise<T>): Promise<T> {
     if (this.busy || this.maintenance.active) throw Errors.conflict('توجد عملية نسخ أو استرداد أخرى جارية. انتظر انتهاءها');
     this.busy = true;
@@ -204,7 +208,7 @@ export class BackupsService {
           return {
             tableCounts: await countTables(tx),
             schemaVersion: await latestMigration(tx),
-            archive: await this.pgTools.dump(this.config.databaseUrl, snapshot[0].id),
+            archive: await this.pgTools.dump(this.toolsDatabaseUrl, snapshot[0].id),
           };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: DUMP_TIMEOUT_MS, maxWait: 15_000 },
@@ -491,7 +495,7 @@ export class BackupsService {
         await this.audit.log({ action: 'backup.restore_started', actor, entityType: 'backup', entityId: id, metadata: { safetyBackupId: safety.record.id }, meta });
 
         try {
-          await this.pgTools.restore(this.config.databaseUrl, inspected.archive);
+          await this.pgTools.restore(this.toolsDatabaseUrl, inspected.archive);
           await this.reconnect();
           done(8, 'الاسترداد');
 
@@ -509,7 +513,7 @@ export class BackupsService {
         } catch (error) {
           // حتى عند انقطاع الأداة بعد تنفيذ COMMIT، نستعيد حالة ما قبل العملية ونتحقق منها.
           try {
-            await this.pgTools.restore(this.config.databaseUrl, safety.archive);
+            await this.pgTools.restore(this.toolsDatabaseUrl, safety.archive);
             await this.reconnect();
             const counts = await countTables(this.prisma);
             if (diffCounts(safety.manifest.tableCounts, counts).length ||
@@ -548,7 +552,7 @@ export class BackupsService {
       const current = parseDatabaseUrl(this.config.databaseUrl).database;
       const scratch = scratchName ?? `${current}_restore_drill`.slice(0, 63);
       if (!/^[a-z][a-z0-9_]{0,62}$/.test(scratch) || scratch === current) throw Errors.validation('اسم قاعدة التجربة غير صالح');
-      const scratchUrl = withDatabaseName(this.config.databaseUrl, scratch);
+      const scratchUrl = withDatabaseName(this.toolsDatabaseUrl, scratch);
 
       await this.prisma.$executeRawUnsafe(`CREATE DATABASE ${quoteIdent(scratch)}`);
       let diffs: string[];

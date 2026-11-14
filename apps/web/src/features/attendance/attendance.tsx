@@ -97,7 +97,8 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   const employees = staff.data ?? [];
   const matches = (row: Employee, query: string) => (row.fullName + ' ' + row.code).toLowerCase().includes(query.trim().toLowerCase());
   const activeEmployees = employees.filter(row => row.status === 'ACTIVE');
-  const activeSelection = activeEmployees.some(row => row.id === selected) ? selected : '';
+  const registrationEmployees = checkIn || correct ? activeEmployees : (offlineRoster.data ?? staff.data ?? []).filter(row => row.status === 'ACTIVE');
+  const activeSelection = registrationEmployees.some(row => row.id === selected) ? selected : '';
   const availableOpenShifts = open.data?.items.filter(row => row.employee.status === 'ACTIVE') ?? [];
   const availableDepartments = departments.data ?? [];
   const pending = queue.filter(item => ['LOCAL', 'PENDING', 'SENDING'].includes(item.state));
@@ -126,12 +127,18 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
       if (path === 'approve') setPayrollWarnings(result.payrollWarnings ?? []);
     });
   }
-  function bulkTransition(action: 'review' | 'approve') {
+  async function bulkTransition(action: 'review' | 'approve') {
     const { departmentId, from, to } = filter;
-    return run(() => api.post<{ updated: number; skipped: number; payrollWarnings?: PayrollWarning[] }>('/attendance/bulk/' + action, {
+    const scope = {
       employeeId: employeeId || filter.employeeId || undefined,
       departmentId: departmentId || undefined, from: from || undefined, to: to || undefined,
-    }), ({ updated, skipped, payrollWarnings }) => {
+    };
+    if (action === 'approve') {
+      let preview: { ready: number; needsReview: number } | undefined;
+      await run(async () => { preview = await api.post('/attendance/bulk/approve/preview', scope); }, '');
+      if (!preview || !window.confirm(`جاهزة للاعتماد: ${preview.ready} · انصراف ناقص أو مسودة: ${preview.needsReview}. متابعة؟`) || !preview.ready) return;
+    }
+    return run(() => api.post<{ updated: number; skipped: number; payrollWarnings?: PayrollWarning[] }>('/attendance/bulk/' + action, scope), ({ updated, skipped, payrollWarnings }) => {
       if (action === 'approve') setPayrollWarnings(payrollWarnings ?? []);
       if (!updated && !skipped) return 'لا توجد سجلات مؤهلة لهذا الإجراء في النطاق المحدد.';
       const label = action === 'review' ? 'أُرسلت للمراجعة' : 'اعتُمدت';
@@ -168,9 +175,9 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
     {quick && section === 'record' && <section id="quick-check-in"><Card className="space-y-4 p-4">
       <h2 className="text-lg font-semibold">التسجيل السريع</h2>
       {offlineReady && process.env.NODE_ENV === 'production' && <p className="text-sm text-muted">حُفظت بيانات التسجيل لهذا الجهاز. عند انقطاع الاتصال افتح التطبيق للوصول إلى شاشة الدوام المحلية.</p>}
-      {(checkIn || correct) && <div className="grid gap-3 sm:grid-cols-2">
+      {(checkIn || checkOut || correct) && <div className="grid gap-3 sm:grid-cols-2">
         <Input label="بحث عن موظف بالاسم أو الكود" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} />
-        <EmployeeSelect employees={activeEmployees.filter(row => row.id === activeSelection || matches(row, staffSearch))}
+        <EmployeeSelect employees={registrationEmployees.filter(row => row.id === activeSelection || matches(row, staffSearch))}
           value={activeSelection} onChange={setSelected} required />
         <DepartmentSelect departments={availableDepartments.filter(row => row.isActive)} value={department} onChange={setDepartment} />
       </div>}
@@ -186,7 +193,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
         <p className="text-sm text-muted">التوقيت حسب النظام ({zone}). اترك الحقل فارغًا للتسجيل بالوقت الحالي.</p>
       </div>}
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        {checkIn && <Button className="min-h-14" disabled={!activeSelection || Boolean(chosenOpen || queuedOpen)} loading={busy}
+        {checkIn && !chosenOpen && !queuedOpen && <Button className="min-h-14" disabled={!activeSelection} loading={busy}
           onClick={() => void (navigator.onLine
             ? run(() => api.post('/attendance/check-in', { employeeId: selected, departmentId: department || undefined, at: quickArrival || undefined }), 'تم تسجيل الحضور')
             : storeOffline({ action: 'CHECK_IN', employeeId: selected, departmentId: department || undefined, checkInAt: quickArrival || new Date().toISOString() }))}>
@@ -195,7 +202,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
         {checkOut && activeSelection && queuedOpen && <Button className="min-h-14" variant="secondary" loading={busy}
           onClick={() => void storeOffline({ action: 'CHECK_OUT', sessionId: queuedOpen.operation.operationId,
             baseVersion: 1, checkOutAt: quickDeparture || new Date().toISOString() })}><LogOut size={20} /> تسجيل الانصراف للوردية المحلية</Button>}
-        {checkOut && chosenOpen && <Button disabled={pendingCheckout(chosenOpen.id)} className="min-h-14" variant="secondary" loading={busy} onClick={() => void checkout(chosenOpen)}>
+        {checkOut && chosenOpen && <Button disabled={pendingCheckout(chosenOpen.id) || chosenOpen.breaks.some(item => !item.endAt)} className="min-h-14" variant="secondary" loading={busy} onClick={() => void checkout(chosenOpen)}>
           <LogOut size={20} /> تسجيل الانصراف
         </Button>}
         {correct && <Button variant="secondary" className="min-h-14" disabled={!activeSelection} onClick={() => showDialog('manual')}>إدخال يدوي</Button>}
@@ -268,9 +275,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
           {correct && <Button variant="secondary" disabled={busy} onClick={() => void bulkTransition('review')}>
             إرسال الكل للمراجعة
           </Button>}
-          {admin && <Button disabled={busy} onClick={() => {
-            if (window.confirm('اعتماد جميع الورديات المؤهلة ضمن الموظف والقسم والتواريخ المحددة؟')) void bulkTransition('approve');
-          }}>اعتماد الكل</Button>}
+          {admin && <Button disabled={busy} onClick={() => void bulkTransition('approve')}>معاينة الاعتماد الجماعي</Button>}
         </div>
         <p className="text-sm text-muted">يشمل الإجراء الورديات المغلقة المؤهلة عبر كل الصفحات حسب الموظف والقسم والتواريخ المحددة.</p>
       </div>}

@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PayrollPeriod, Prisma } from '@abu-qamar/database';
 import { ERROR_CODES } from '@abu-qamar/shared';
 import { lockEmployee } from '../attendance/attendance-common';
@@ -11,6 +11,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { addDays, formatDateOnly, parseDateOnly, todayInZone } from '../common/utils/dates';
 import { resolvePlannedShifts } from '../schedules/schedule-math';
 import { SettingsService } from '../settings/settings.module';
+import { MaintenanceService } from '../maintenance/maintenance.module';
 import { calculateEntry } from './calc/calculator';
 import { monthEnd, monthKey, monthStart } from './calc/iso-dates';
 import { resolvePayrollPeriod } from './calc/periods';
@@ -44,12 +45,48 @@ export async function lockPayroll(tx: Tx) {
 }
 
 @Injectable()
-export class PayrollService {
+export class PayrollService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(PayrollService.name);
+  private timer?: ReturnType<typeof setInterval>;
+  private lastPreparedDay?: string;
+  private preparing = false;
   constructor(
     private readonly db: PrismaService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
+    private readonly maintenance: MaintenanceService,
   ) {}
+
+  onModuleInit() {
+    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'staging') return;
+    const tick = () => void this.prepareScheduled().catch(() => this.logger.warn('تعذّر تجهيز دورات الرواتب تلقائيًا'));
+    this.timer = setInterval(tick, 15 * 60_000);
+    tick();
+  }
+
+  onModuleDestroy() {
+    clearInterval(this.timer);
+  }
+
+  private async prepareScheduled() {
+    if (this.preparing || this.maintenance.active) return;
+    const release = this.maintenance.trackRequest();
+    this.preparing = true;
+    try {
+      const settings = await this.settings.getAll();
+      const day = iso(todayInZone(settings['general.timezone']));
+      if (day === this.lastPreparedDay) return;
+      const admin = await this.db.user.findFirst({
+        where: { role: 'ADMIN', isActive: true }, select: { id: true, username: true },
+      });
+      if (!admin) return;
+      await this.prepareCycles(admin);
+      this.lastPreparedDay = day;
+    } finally {
+      this.preparing = false;
+      release();
+    }
+  }
 
   async list(query: PeriodsQueryDto) {
     const where = { frequency: query.frequency, status: query.status };
@@ -92,6 +129,10 @@ export class PayrollService {
 
   async prepareCurrent(actor: AuthContext, meta: RequestMeta) {
     if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
+    return this.prepareCycles(actor, meta);
+  }
+
+  private async prepareCycles(actor: AuthContext | { id: string; username: string }, meta?: RequestMeta) {
     return this.db.$transaction(async tx => {
       await lockPayroll(tx);
       const settings = await this.settings.getAll(tx);
@@ -110,7 +151,7 @@ export class PayrollService {
         const bounds = resolvePayrollPeriod(frequency, iso(today), settings['general.weekStartsOn']);
         const period = existing ?? await tx.payrollPeriod.create({ data: {
           frequency, startDate: parseDateOnly(bounds.start)!, endDate: parseDateOnly(bounds.end)!,
-          label: bounds.label, createdById: actor.user.id,
+          label: bounds.label, createdById: ('user' in actor ? actor.user : actor).id,
         } });
         await this.calculatePeriod(tx, period.id, 'calculate', actor, meta, settings['general.timezone']);
       }
@@ -426,7 +467,7 @@ export class PayrollService {
   }
 
   private async calculatePeriod(tx: Tx, id: string, operation: 'calculate' | 'review' | 'approve' | 'close',
-    actor: AuthContext, meta: RequestMeta, timezone: string, onlyEmployeeId?: string) {
+    actor: AuthContext | { id: string; username: string }, meta: RequestMeta | undefined, timezone: string, onlyEmployeeId?: string) {
       const period = await this.get(id, tx);
       const allowed = { review: 'DRAFT', approve: 'IN_REVIEW', close: 'READY_FOR_APPROVAL' };
       if (period.status === 'CLOSED' || (operation !== 'calculate' && period.status !== allowed[operation])) {
@@ -482,16 +523,17 @@ export class PayrollService {
         await tx.payrollAdjustment.updateMany({ where: { appliedEntryId: stale.id }, data: { status: 'APPROVED', appliedEntryId: null } });
         await tx.payrollEntry.delete({ where: { id: stale.id } });
       }
+      const actorId = ('user' in actor ? actor.user : actor).id;
       const now = new Date();
       const data: Prisma.PayrollPeriodUncheckedUpdateInput = {
         calculate: period.status === 'READY_FOR_APPROVAL' ? { status: 'IN_REVIEW', approvedAt: null, approvedById: null } : {},
         review: { status: 'IN_REVIEW' },
-        approve: { status: 'READY_FOR_APPROVAL', approvedAt: now, approvedById: actor.user.id },
-        close: { status: 'CLOSED', closedAt: now, closedById: actor.user.id },
+        approve: { status: 'READY_FOR_APPROVAL', approvedAt: now, approvedById: actorId },
+        close: { status: 'CLOSED', closedAt: now, closedById: actorId },
       }[operation] as Prisma.PayrollPeriodUncheckedUpdateInput;
       await tx.payrollPeriod.update({ where: { id }, data });
       if (operation === 'review') {
-        await tx.notification.create({ data: { userId: actor.user.id, type: 'PAYROLL_READY_FOR_REVIEW',
+        await tx.notification.create({ data: { userId: actorId, type: 'PAYROLL_READY_FOR_REVIEW',
           title: 'الرواتب جاهزة للمراجعة', body: period.label, data: { periodId: id } } });
       }
       await this.audit.log({ action: `payroll.period.${operation}`, actor, meta, entityType: 'payroll_period', entityId: id,

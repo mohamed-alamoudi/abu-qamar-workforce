@@ -1,6 +1,6 @@
 'use client';
 
-import { BarChart3, Clock, HandCoins, Lock, LogIn, LogOut, type LucideIcon, UserPlus, Users, Wallet } from 'lucide-react';
+import { BarChart3, Clock, HandCoins, Lock, LogIn, type LucideIcon, UserPlus, Users, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { can, canAny, DASHBOARD_PERIODS, type DashboardPeriod } from '@abu-qamar/shared';
@@ -114,8 +114,8 @@ export default function DashboardPage() {
     : '';
 
   const actions = [
-    { href: '/attendance#quick-check-in', label: 'تسجيل حضور', icon: LogIn, show: can(user, 'attendance.check_in') },
-    { href: '/attendance#quick-check-out', label: 'تسجيل انصراف', icon: LogOut, show: can(user, 'attendance.check_out') },
+    { href: '/attendance#quick-check-in', label: 'سجّل الدوام', icon: LogIn,
+      show: canAny(user, ['attendance.check_in', 'attendance.check_out', 'attendance.correct']) },
     { href: '/employees?new=1', label: 'إضافة موظف', icon: UserPlus, show: can(user, 'employees.create') },
     { href: '/payroll', label: 'عرض الرواتب', icon: Wallet, show: user?.role === 'ADMIN' },
     {

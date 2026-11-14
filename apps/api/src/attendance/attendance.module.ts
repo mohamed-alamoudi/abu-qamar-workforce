@@ -132,6 +132,11 @@ class AttendanceController {
     return this.service.bulkTransition('approve', dto, actor, meta);
   }
 
+  @Post('bulk/approve/preview')
+  previewApproval(@Body() dto: BulkTransitionDto, @Auth() actor: AuthContext) {
+    return this.service.previewApproval(dto, actor);
+  }
+
   @Post(':id/review')
   @RequirePermissions('attendance.correct')
   review(@Param('id', ParseUUIDPipe) id: string, @Body() dto: TransitionDto, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {

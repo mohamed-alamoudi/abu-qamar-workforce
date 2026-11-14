@@ -281,6 +281,18 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
     }, transaction);
   }
 
+  async previewApproval(scope: { employeeId?: string; departmentId?: string; from?: Date; to?: Date }, actor: AuthContext) {
+    if (actor.user.role !== 'ADMIN') throw Errors.adminOnly();
+    if (scope.from && scope.to && scope.from > scope.to) throw Errors.validation('تاريخ النهاية يسبق البداية');
+    const where = { employeeId: scope.employeeId, departmentId: scope.departmentId,
+      workDate: { gte: scope.from, lte: scope.to } };
+    const [ready, needsReview] = await this.db.$transaction([
+      this.db.workSession.count({ where: { ...where, status: 'CLOSED', checkOutAt: { not: null }, approvalStatus: 'IN_REVIEW' } }),
+      this.db.workSession.count({ where: { ...where, OR: [{ status: 'OPEN' }, { status: 'CLOSED', approvalStatus: 'DRAFT' }] } }),
+    ]);
+    return { ready, needsReview };
+  }
+
   async bulkTransition(action: 'review' | 'approve',
     scope: { employeeId?: string; departmentId?: string; from?: Date; to?: Date }, actor: AuthContext, meta: RequestMeta) {
     if (action === 'review') this.authorize(actor, 'attendance.correct');
