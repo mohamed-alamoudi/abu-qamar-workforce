@@ -43,7 +43,7 @@
       if (busy || checkingConnection || !navigator.onLine) return;
       checkingConnection = true;
       try {
-        const response = await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+        const response = await window.fetch('/api/health', { cache: 'no-store', signal: window.AbortSignal?.timeout?.(5000) });
         if (response.ok && !busy) location.replace('/attendance');
       } catch {
         // A browser can report connectivity before the server is reachable.
