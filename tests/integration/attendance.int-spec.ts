@@ -21,6 +21,16 @@ describe('الحضور والانصراف', () => {
     expect(employeeId).toBeDefined();
   });
 
+  it('يحفظ وقت الحضور والانصراف المختار في التسجيل السريع', async () => {
+    const opened = await admin.post('/attendance/check-in', { employeeId, at: '2026-03-01T08:00' }).expect(201);
+    await admin.post('/attendance/check-out', {
+      employeeId, sessionId: opened.body.id, baseVersion: opened.body.version, at: '2026-03-01T10:00',
+    }).expect(201);
+    const session = await ctx.prisma.workSession.findUniqueOrThrow({ where: { id: opened.body.id } });
+    expect(session.workDate.toISOString().slice(0, 10)).toBe('2026-03-01');
+    expect(session.workedMinutes).toBe(120);
+  });
+
   const manual = (checkInAt: string, checkOutAt?: string, extra: object = {}) =>
     admin.post('/attendance/manual', { employeeId, checkInAt, checkOutAt, ...extra });
 

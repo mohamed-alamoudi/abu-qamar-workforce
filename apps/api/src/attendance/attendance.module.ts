@@ -21,10 +21,13 @@ class OperationDto {
 class EmployeeDto extends OperationDto {
   @IsUUID(undefined, { message: 'معرّف السجل غير صالح' }) employeeId: string;
 }
-class CheckInDto extends EmployeeDto {
+class TimedAttendanceDto extends EmployeeDto {
+  @IsOptional() @Matches(INSTANT_REGEX, { message: 'أدخل وقتًا صالحًا بصيغة YYYY-MM-DDTHH:mm' }) at?: string;
+}
+class CheckInDto extends TimedAttendanceDto {
   @IsOptional() @IsUUID(undefined, { message: 'معرّف السجل غير صالح' }) departmentId?: string;
 }
-class CheckOutDto extends EmployeeDto {
+class CheckOutDto extends TimedAttendanceDto {
   @IsOptional() @IsUUID(undefined, { message: 'معرّف السجل غير صالح' }) sessionId?: string;
 }
 class ManualDto extends CheckInDto {
