@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page';
 import { useResource } from '@/features/attendance/shared';
 import { usePersistedState } from '@/hooks/use-persisted-state';
 import { api, errorMessage } from '@/lib/api';
+import { QUEUE_CHANGED, readQueue } from '@/lib/attendance-queue';
 import { formatDate, formatDuration, formatMoney, formatNumber } from '@/lib/format';
 import type { DashboardSummary } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
@@ -78,8 +79,19 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const openShifts = useResource<{ total: number }>(canAny(user, ['attendance.view', 'attendance.check_in', 'attendance.check_out'])
-    ? '/attendance/open?pageSize=1' : null);
+  const [syncIssues, setSyncIssues] = useState(0);
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+    const refresh = () => void readQueue(user.id).then(items => {
+      if (active) setSyncIssues(items.filter(item => item.state === 'FAILED' || item.state === 'CONFLICT').length);
+    }).catch(() => {});
+    refresh();
+    window.addEventListener(QUEUE_CHANGED, refresh);
+    return () => { active = false; window.removeEventListener(QUEUE_CHANGED, refresh); };
+  }, [user?.id]);
+  const openShifts = useResource<{ total: number; items: { id: string; missingCheckOut: boolean; employee: { fullName: string } }[] }>(
+    canAny(user, ['attendance.view', 'attendance.check_in', 'attendance.check_out']) ? '/attendance/open?pageSize=20' : null);
   const reviewShifts = useResource<{ total: number }>(can(user, 'attendance.view')
     ? '/attendance?status=CLOSED&approvalStatus=IN_REVIEW&pageSize=1' : null);
 
@@ -158,15 +170,23 @@ export default function DashboardPage() {
           {actions.map((action) => <QuickAction key={action.href} {...action} />)}
         </section>
       )}
-      {(openShifts.data || reviewShifts.data) && <section aria-labelledby="attention-title" className="mb-4">
+      {(openShifts.data || reviewShifts.data || syncIssues > 0) && <section aria-labelledby="attention-title" className="mb-4">
         <h2 id="attention-title" className="mb-2 font-semibold">بحاجة إلى انتباه</h2>
         <div className="flex flex-wrap gap-3 text-sm">
+        {syncIssues > 0 && <a className="rounded-lg border border-line bg-surface p-3 underline" href="#attendance-sync"
+          onClick={() => { const queue = document.getElementById('attendance-sync'); if (queue instanceof HTMLDetailsElement) queue.open = true; }}>
+          عمليات مزامنة تحتاج مراجعة · {formatNumber(syncIssues)}
+        </a>}
         {openShifts.data && <Link className="rounded-lg border border-line bg-surface p-3 underline" href="/attendance#quick-check-out">
           الورديات المفتوحة · {formatNumber(openShifts.data.total)}
         </Link>}
         {reviewShifts.data && <Link className="rounded-lg border border-line bg-surface p-3 underline" href="/attendance#review">
           دوام قيد المراجعة · {formatNumber(reviewShifts.data.total)}
         </Link>}
+        {openShifts.data?.items.filter(shift => shift.missingCheckOut).map(shift =>
+          <Link key={shift.id} className="rounded-lg border border-line bg-surface p-3 underline" href={`/attendance#shift-${shift.id}`}>
+            انصراف ناقص · {shift.employee.fullName}
+          </Link>)}
         </div>
       </section>}
       <section aria-label="المؤشرات" className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">

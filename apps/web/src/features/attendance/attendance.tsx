@@ -100,6 +100,10 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
   const registrationEmployees = checkIn || correct ? activeEmployees : (offlineRoster.data ?? staff.data ?? []).filter(row => row.status === 'ACTIVE');
   const activeSelection = registrationEmployees.some(row => row.id === selected) ? selected : '';
   const availableOpenShifts = open.data?.items.filter(row => row.employee.status === 'ACTIVE') ?? [];
+  useEffect(() => {
+    if (!quick || section !== 'record' || !open.data || !window.location.hash.startsWith('#shift-')) return;
+    document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: 'center' });
+  }, [quick, section, open.data]);
   const availableDepartments = departments.data ?? [];
   const pending = queue.filter(item => ['LOCAL', 'PENDING', 'SENDING'].includes(item.state));
   const queuedOpen = pending.find(({ operation }) => operation.employeeId === selected &&
@@ -219,7 +223,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
       {open.data && availableOpenShifts.length === 0 && <p className="text-muted">لا توجد ورديات مفتوحة.</p>}
       {availableOpenShifts.map(row => {
         const activeBreak = row.breaks.find(item => !item.endAt);
-        return <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line p-3">
+        return <div key={row.id} id={`shift-${row.id}`} className="flex scroll-mt-24 flex-wrap items-center justify-between gap-3 rounded-lg border border-line p-3 target:ring-2 target:ring-brand-500">
           <div><p className="font-semibold">{row.employee.fullName} · {row.department.name}</p>
             <p className="text-sm text-muted">{time(row.checkInAt)} {activeBreak && '· في استراحة'}</p>
             {row.missingCheckOut && <p className="text-sm font-medium text-danger-600">انصراف ناقص</p>}</div>

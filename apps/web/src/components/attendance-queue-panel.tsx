@@ -54,7 +54,7 @@ export function AttendanceQueuePanel({ userId }: { userId: string }) {
   if (storageError) return <p role="alert">تعذر فتح طابور الدوام على هذا الجهاز.</p>;
   if (!items.length) return null;
   return (
-    <details className="mb-4 rounded-lg border border-line bg-surface p-3">
+    <details id="attendance-sync" className="mb-4 scroll-mt-24 rounded-lg border border-line bg-surface p-3">
       <summary className="cursor-pointer font-semibold">مزامنة الدوام · {items.filter(({ state }) => ['LOCAL', 'PENDING', 'SENDING'].includes(state)).length} بانتظار الإرسال · {items.filter(({ state }) => ['FAILED', 'CONFLICT'].includes(state)).length} تحتاج مراجعة</summary>
       <ul className="mt-3 max-h-64 space-y-2 overflow-auto">
         {[...items].sort((a, b) => b.operation.createdAt.localeCompare(a.operation.createdAt)).map((item) => (

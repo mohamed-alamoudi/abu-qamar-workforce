@@ -75,11 +75,13 @@ test('إضافة موظف ومزامنة حضوره وانصرافه بعد عو
     await page.getByLabel('الموظف', { exact: true }).selectOption(employeeId);
     const arrival = '2025-01-15T08:00';
     const departure = '2025-01-15T10:00';
+    await page.getByText('تحديد التاريخ والوقت', { exact: true }).click();
     await page.getByLabel('وقت الحضور').fill(arrival);
     await page.getByRole('button', { name: 'تسجيل الحضور', exact: true }).click();
     await expect(page.getByText('محفوظ محليًا · بانتظار تأكيد الخادم')).toBeVisible();
     await page.reload();
     await page.getByLabel('الموظف', { exact: true }).selectOption(employeeId);
+    await page.getByText('تحديد التاريخ والوقت', { exact: true }).click();
     await page.getByLabel('وقت الانصراف').fill(departure);
     await page.getByRole('button', { name: 'تسجيل الانصراف', exact: true }).click();
     await expect(page.getByRole('button', { name: 'تسجيل الانصراف', exact: true })).toBeDisabled();

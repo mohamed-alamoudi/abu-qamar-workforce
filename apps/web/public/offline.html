@@ -34,11 +34,15 @@
       </div>
       <p id="zone"></p>
       <p id="open-shift"></p>
+      <details id="time-fields">
+      <summary>تحديد التاريخ والوقت</summary>
+      <p>اترك الحقول فارغة لتسجيل الحضور أو الانصراف بالوقت الحالي.</p>
       <div id="arrival-field"><label for="arrival">وقت الحضور</label><input id="arrival" type="datetime-local"></div>
       <div id="departure-field"><label for="departure">وقت الانصراف</label><input id="departure" type="datetime-local"></div>
+      <button id="manual" type="button">حفظ وردية كاملة</button>
+      </details>
       <button id="in" type="button">تسجيل الحضور</button>
       <button id="out" type="button">تسجيل الانصراف</button>
-      <button id="manual" type="button">حفظ وردية كاملة</button>
     </section>
     <p role="status" id="result"></p>
     <ul id="queue"></ul>

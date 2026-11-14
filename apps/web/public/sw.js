@@ -1,5 +1,5 @@
 /* Only versioned assets and the public offline page are stored. */
-const CACHE = 'aq-shell-v6';
+const CACHE = 'aq-shell-v7';
 const SHELL = '/offline.html';
 const PUBLIC_ASSETS = [SHELL, '/offline-attendance.js', '/icon-192.png?v=2', '/icon-512.png?v=2'];
 

@@ -31,7 +31,10 @@
       hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
     });
     const localTime = value => value && (value.length === 16 ? value : formatter.format(new Date(value)).replace(' ', 'T'));
-    const resetTimes = () => { arrival.value = departure.value = localTime(new Date().toISOString()); };
+    const timeFields = get('time-fields');
+    timeFields.addEventListener('toggle', () => {
+      if (!timeFields.open) arrival.value = departure.value = '';
+    });
     get('zone').textContent = 'الأوقات حسب توقيت النظام (' + zone + ')';
     department.add(new Option('القسم الافتراضي', ''));
     for (const item of saved.departments ?? []) department.add(new Option(item.name, item.id));
@@ -128,10 +131,10 @@
           const now = new Date().toISOString();
           let fields;
           if (action === 'CHECK_IN' && saved.checkIn && !shift) {
-            fields = { employeeId: id, checkInAt: arrival.value, departmentId: department.value || undefined };
+            fields = { employeeId: id, checkInAt: (timeFields.open && arrival.value) || now, departmentId: department.value || undefined };
           }
           if (action === 'CHECK_OUT' && saved.checkOut && shift && !shift.onBreak) {
-            fields = { sessionId: shift.id, baseVersion: shift.version, checkOutAt: departure.value };
+            fields = { sessionId: shift.id, baseVersion: shift.version, checkOutAt: (timeFields.open && departure.value) || now };
           }
           if (action === 'MANUAL' && saved.correct) {
             fields = { employeeId: id, checkInAt: arrival.value, checkOutAt: departure.value, departmentId: department.value || undefined };
@@ -145,7 +148,7 @@
             return;
           }
           const start = fields.checkInAt ?? localTime(shift?.checkInAt);
-          if (start && fields.checkOutAt && fields.checkOutAt <= start) {
+          if (start && fields.checkOutAt && localTime(fields.checkOutAt) < start) {
             say('وقت الانصراف لازم يكون بعد وقت الحضور.');
             return;
           }
@@ -175,7 +178,6 @@
     get('manual').addEventListener('click', () => void record('MANUAL'));
     window.addEventListener('online', () => { reconnect = true; void resumeOnline(); });
     window.setInterval(() => void resumeOnline(), 2500);
-    resetTimes();
     renderEmployees();
     await refresh();
   } catch {
