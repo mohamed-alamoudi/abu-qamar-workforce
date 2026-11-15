@@ -20,7 +20,13 @@ import { computeWorkedMinutes, localDateOf } from './attendance-math';
 export interface OperationOptions { clientOperationId?: string; baseVersion?: number }
 export interface CheckInInput extends OperationOptions { employeeId: string; departmentId?: string; at?: TimeInput }
 export interface CheckOutInput extends OperationOptions { employeeId: string; sessionId?: string; at?: TimeInput }
-export interface ManualInput extends OperationOptions { employeeId: string; departmentId?: string; checkInAt: TimeInput; checkOutAt?: TimeInput }
+export interface ManualInput extends OperationOptions {
+  employeeId: string;
+  departmentId?: string;
+  checkInAt: TimeInput;
+  checkOutAt?: TimeInput;
+  break?: { startAt: TimeInput; endAt: TimeInput; isPaid: boolean };
+}
 export interface CorrectionInput extends OperationOptions { version?: number; checkInAt?: TimeInput; checkOutAt?: TimeInput; departmentId?: string; reason: string }
 type Operation = 'check-in' | 'check-out' | 'manual' | 'correct';
 const include = {
@@ -185,26 +191,46 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
     return this.create('manual', input, actor, meta, transaction);
   }
 
+  async previewManual(input: ManualInput) {
+    return this.validateNewShift(this.db, input, true, true);
+  }
+
+  private async validateNewShift(tx: Db, input: ManualInput, manual: boolean, preview: boolean) {
+    const employee = await tx.employee.findUnique({ where: { id: input.employeeId } });
+    if (!employee) throw Errors.notFound('الموظف غير موجود');
+    const zone = await this.timezone();
+    const checkInAt = resolveInstant(input.checkInAt, zone, 'وقت الحضور');
+    const checkOutAt = input.checkOutAt ? resolveInstant(input.checkOutAt, zone, 'وقت الانصراف') : null;
+    const workDate = localDateOf(checkInAt, zone);
+    if (employee.status !== 'ACTIVE' || (employee.terminationDate && workDate > employee.terminationDate)) {
+      throw Errors.conflict('الموظف متوقف في تاريخ الوردية');
+    }
+    const departmentId = input.departmentId ?? employee.departmentId;
+    await this.assertDepartment(tx, departmentId, !manual);
+    const breaks = input.break ? [{
+      startAt: resolveInstant(input.break.startAt, zone, 'بداية الاستراحة'),
+      endAt: resolveInstant(input.break.endAt, zone, 'نهاية الاستراحة'),
+      isPaid: input.break.isPaid,
+    }] : [];
+    if (breaks.some(item => item.endAt <= item.startAt) || (breaks.length && !checkOutAt)) {
+      throw Errors.validation('أدخل استراحة مكتملة داخل وقت الوردية');
+    }
+    this.assertBreaks(breaks, checkInAt, checkOutAt);
+    await this.assertInterval(tx, employee.id, checkInAt, checkOutAt, zone, undefined, preview);
+    return { employee, departmentId, workDate, checkInAt, checkOutAt, breaks };
+  }
+
   private async create(kind: 'check-in' | 'manual', input: ManualInput, actor: AuthContext, meta: RequestMeta, transaction?: Db) {
     this.authorize(actor, kind === 'manual' ? 'attendance.correct' : 'attendance.check_in');
     return this.operation(kind, input, actor, async tx => {
       await lockEmployee(tx, input.employeeId);
-      const employee = await tx.employee.findUnique({ where: { id: input.employeeId } });
-      if (!employee) throw Errors.notFound('الموظف غير موجود');
-      const zone = await this.timezone();
-      const checkInAt = resolveInstant(input.checkInAt, zone, 'وقت الحضور');
-      const checkOutAt = input.checkOutAt ? resolveInstant(input.checkOutAt, zone, 'وقت الانصراف') : null;
-      const workDate = localDateOf(checkInAt, zone);
-      if (employee.status !== 'ACTIVE' || (employee.terminationDate && workDate > employee.terminationDate)) {
-        throw Errors.conflict('الموظف متوقف في تاريخ الوردية');
-      }
-      const departmentId = input.departmentId ?? employee.departmentId;
-      await this.assertDepartment(tx, departmentId, kind === 'check-in');
-      await this.assertInterval(tx, employee.id, checkInAt, checkOutAt, zone);
+      const { employee, departmentId, workDate, checkInAt, checkOutAt, breaks } =
+        await this.validateNewShift(tx, input, kind === 'manual', false);
       const row = await tx.workSession.create({ data: {
         employeeId: employee.id, departmentId, workDate, checkInAt, checkOutAt, originalCheckInAt: checkInAt,
         originalCheckOutAt: checkOutAt, status: checkOutAt ? 'CLOSED' : 'OPEN',
-        workedMinutes: checkOutAt ? computeWorkedMinutes(checkInAt, checkOutAt, []) : null,
+        workedMinutes: checkOutAt ? computeWorkedMinutes(checkInAt, checkOutAt, breaks) : null,
+        breaks: { create: breaks.map(item => ({ ...item, createdById: actor.user.id })) },
         source: input.clientOperationId ? 'OFFLINE_SYNC' : kind === 'manual' ? 'MANUAL' : 'QUICK',
         createdById: actor.user.id, clientOperationId: input.clientOperationId,
       }, include });
@@ -416,7 +442,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
     if (version !== undefined && version !== row.version) throw Errors.conflict('تغيّر سجل الدوام. حدّث الصفحة ثم أعد المحاولة');
   }
 
-  private async assertInterval(tx: Db, employeeId: string, start: Date, end: Date | null, zone: string, exclude?: string) {
+  private async assertInterval(tx: Db, employeeId: string, start: Date, end: Date | null, zone: string, exclude?: string, preview = false) {
     if (end && end <= start) throw Errors.validation('وقت الانصراف يجب أن يلي وقت الحضور');
     if (start > new Date() || (end && end > new Date())) throw Errors.validation('أوقات الدوام لا تكون في المستقبل');
     await assertOpenPayroll(tx, employeeId, localDateOf(start, zone));
@@ -433,6 +459,7 @@ export class AttendanceService implements OnModuleInit, OnModuleDestroy {
       const automatic = leave.status === 'PENDING' && leave.reason === automaticAbsenceReason &&
         await tx.auditLog.findFirst({ where: { entityId: leave.id, action: 'leave.auto_recorded' }, select: { id: true } });
       if (!automatic) throw Errors.conflict('تتداخل الوردية مع إجازة أو غياب مسجل للموظف');
+      if (preview) continue;
       await tx.leaveRecord.update({ where: { id: leave.id }, data: { status: 'CANCELLED' } });
       await this.audit.log({ action: 'leave.auto_cancelled_by_attendance', entityType: 'leave_record', entityId: leave.id,
         metadata: { employeeId } }, tx);

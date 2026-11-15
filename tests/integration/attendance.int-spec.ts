@@ -1,3 +1,5 @@
+import ExcelJS from 'exceljs';
+import { AttendanceImportService } from '../../apps/api/src/attendance/attendance-import.service';
 import { AttendanceService } from '../../apps/api/src/attendance/attendance.service';
 import { Client, createSupervisor, createTestApp, resetDatabase, setupAdmin, type TestContext } from './helpers';
 
@@ -33,6 +35,37 @@ describe('الحضور والانصراف', () => {
 
   const manual = (checkInAt: string, checkOutAt?: string, extra: object = {}) =>
     admin.post('/attendance/manual', { employeeId, checkInAt, checkOutAt, ...extra });
+
+  it('يعاين Excel ويحفظ الورديات الصالحة كمسودات مرة واحدة', async () => {
+    const employee = await ctx.prisma.employee.findUniqueOrThrow({ where: { id: employeeId } });
+    const template = await ctx.app.get(AttendanceImportService).template();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(template as unknown as ExcelJS.Buffer);
+    const sheet = workbook.getWorksheet('الدوام')!;
+    const shift = [employee.code, employee.fullName, '2026-03-01 22:00', '2026-03-02 01:00',
+      '2026-03-01 23:00', '2026-03-01 23:30', 'لا'];
+    sheet.addRows([shift, shift, ['EMP-UNKNOWN', '', shift[2], shift[3]]]);
+    const file = Buffer.from(await workbook.xlsx.writeBuffer());
+    const upload = (client: Client, action: string) => client.send('post', '/attendance/import/' + action)
+      .attach('file', file, 'attendance.xlsx');
+    const viewer = await createSupervisor(ctx, admin, ['attendance.view']);
+    await viewer.client.get('/attendance/import/template').expect(403);
+    await upload(viewer.client, 'save').expect(403);
+    await admin.get('/attendance/import/template').expect(200);
+    const preview = await upload(admin, 'preview').expect(200);
+    expect(preview.body.rows.map((row: { ok: boolean }) => row.ok)).toEqual([true, false, false]);
+    expect(await ctx.prisma.workSession.count()).toBe(0);
+    const saved = await upload(admin, 'save').expect(200);
+    expect(saved.body.rows.map((row: { ok: boolean }) => row.ok)).toEqual([true, false, false]);
+    const replay = await upload(admin, 'save').expect(200);
+    expect(replay.body.rows.every((row: { ok: boolean }) => !row.ok)).toBe(true);
+    const sessions = await ctx.prisma.workSession.findMany({ include: { breaks: true } });
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({ workedMinutes: 150, approvalStatus: 'DRAFT', breaks: [{ isPaid: false }] });
+    await admin.post('/attendance/bulk/review', {}).expect(201);
+    await admin.post('/attendance/bulk/approve', {}).expect(201);
+    expect((await admin.get('/employees/' + employeeId + '/financial-balances').expect(200)).body.provisional).toBe('50');
+  });
 
   it('يرسل ويعتمد كل الورديات المؤهلة في النطاق عبر أكثر من صفحة', async () => {
     const first = await manual('2026-03-01T08:00', '2026-03-01T09:00').expect(201);

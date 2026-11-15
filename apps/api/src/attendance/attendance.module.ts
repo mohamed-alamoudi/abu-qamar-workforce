@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Module, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Module, Param, ParseUUIDPipe, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsDate, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min } from 'class-validator';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
@@ -13,6 +14,11 @@ import { PayrollModule } from '../payroll/payroll.module';
 import { INSTANT_REGEX, SchedulesModule } from '../schedules/schedules.module';
 import { SettingsModule } from '../settings/settings.module';
 import { AttendanceService } from './attendance.service';
+import { ATTENDANCE_FILE_LIMIT, AttendanceImportService } from './attendance-import.service';
+
+const WorkbookUpload = () => UseInterceptors(FileInterceptor('file', {
+  limits: { fileSize: ATTENDANCE_FILE_LIMIT, files: 1, fields: 0 },
+}));
 
 class OperationDto {
   @IsOptional() @Matches(/^[A-Za-z0-9_-]{1,64}$/) clientOperationId?: string;
@@ -70,7 +76,36 @@ class ListDto extends PaginationQueryDto {
 @ApiCookieAuth()
 @Controller('attendance')
 class AttendanceController {
-  constructor(private readonly service: AttendanceService, private readonly db: PrismaService) {}
+  constructor(private readonly service: AttendanceService, private readonly db: PrismaService,
+    private readonly importer: AttendanceImportService) {}
+
+  @Get('import/template')
+  @RequirePermissions('attendance.correct')
+  @Header('Cache-Control', 'no-store')
+  async importTemplate() {
+    return new StreamableFile(await this.importer.template(), {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      disposition: 'attachment; filename="attendance-template.xlsx"',
+    });
+  }
+
+  @Post('import/preview')
+  @HttpCode(200)
+  @RequirePermissions('attendance.correct')
+  @WorkbookUpload()
+  previewImport(@UploadedFile() file: { buffer: Buffer } | undefined, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+    if (!file?.buffer.length) throw Errors.validation('اختر ملف Excel');
+    return this.importer.process(file.buffer, false, actor, meta);
+  }
+
+  @Post('import/save')
+  @HttpCode(200)
+  @RequirePermissions('attendance.correct')
+  @WorkbookUpload()
+  saveImport(@UploadedFile() file: { buffer: Buffer } | undefined, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+    if (!file?.buffer.length) throw Errors.validation('اختر ملف Excel');
+    return this.importer.process(file.buffer, true, actor, meta);
+  }
 
   @Get()
   @RequirePermissions('attendance.view')
@@ -170,6 +205,6 @@ class AttendanceController {
 }
 
 @Module({ imports: [SettingsModule, SchedulesModule, OvertimeModule, NotificationsModule, PayrollModule],
-  controllers: [AttendanceController], providers: [AttendanceService], exports: [AttendanceService] })
+  controllers: [AttendanceController], providers: [AttendanceService, AttendanceImportService], exports: [AttendanceService] })
 export class AttendanceModule { }
 export { AttendanceService } from './attendance.service';

@@ -10,6 +10,7 @@ import { api, toQuery } from '@/lib/api';
 import { ATTENDANCE_SYNCED, enqueueAttendance, QUEUE_CHANGED, readQueue, type AttendanceInput, type QueueItem } from '@/lib/attendance-queue';
 import { formatDuration } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
+import { AttendanceImport } from './attendance-import';
 import { DepartmentSelect, EmployeeSelect, Feedback, localTime, Submit, useMutation, useResource, type Department, type Employee, type Page } from './shared';
 
 type Session = {
@@ -177,6 +178,7 @@ export function AttendancePanel({ employeeId, quick = true }: { employeeId?: str
         <li key={employeeId + message}>{message} · <Link className="underline" href={`/employees/${employeeId}#finance`}>فتح الحساب المالي</Link></li>)}</ul>
     </Card>}
     <Feedback error={staff.error ?? departments.error} />
+    {quick && correct && section === 'record' && <AttendanceImport timezone={zone} onSaved={refresh} />}
     {quick && section === 'record' && <section id="quick-check-in"><Card className="space-y-4 p-4">
       <h2 className="text-lg font-semibold">التسجيل السريع</h2>
       {offlineReady && process.env.NODE_ENV === 'production' && <p className="text-sm text-muted">حُفظت بيانات التسجيل لهذا الجهاز. عند انقطاع الاتصال افتح التطبيق للوصول إلى شاشة الدوام المحلية.</p>}

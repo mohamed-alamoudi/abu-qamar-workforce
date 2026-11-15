@@ -19,6 +19,7 @@ export class ApiError extends Error {
 }
 
 interface RequestOptions {
+  responseType?: 'blob';
   idempotencyKey?: string;
   /** لا تعرض نافذة إعادة إدخال كلمة المرور (تُستخدم داخليًا عند إعادة المحاولة) */
   noReauth?: boolean;
@@ -74,6 +75,12 @@ async function request<T>(method: string, path: string, body?: unknown, options:
   let response: Response;
   try {
     const init = buildRequestInit(method, body, csrfToken);
+    if (body instanceof FormData) {
+      const headers = new Headers(init.headers);
+      headers.delete('Content-Type');
+      init.headers = headers;
+      init.body = body;
+    }
     if (options.idempotencyKey) {
       const headers = new Headers(init.headers);
       headers.set('Idempotency-Key', options.idempotencyKey);
@@ -84,6 +91,7 @@ async function request<T>(method: string, path: string, body?: unknown, options:
     throw new ApiError(0, 'NETWORK', 'تعذر الاتصال بالخادم. تحقق من اتصال الإنترنت');
   }
 
+  if (response.ok && options.responseType === 'blob') return await response.blob() as T;
   const text = await response.text();
   let payload: unknown = null;
   if (text) {
