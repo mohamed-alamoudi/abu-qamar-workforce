@@ -93,18 +93,20 @@ class AttendanceController {
   @HttpCode(200)
   @RequirePermissions('attendance.correct')
   @WorkbookUpload()
-  previewImport(@UploadedFile() file: { buffer: Buffer } | undefined, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+  previewImport(@UploadedFile() file: { buffer: Buffer } | undefined, @Query('date') date: string | undefined,
+    @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
     if (!file?.buffer.length) throw Errors.validation('اختر ملف Excel');
-    return this.importer.process(file.buffer, false, actor, meta);
+    return this.importer.process(file.buffer, false, actor, meta, date);
   }
 
   @Post('import/save')
   @HttpCode(200)
   @RequirePermissions('attendance.correct')
   @WorkbookUpload()
-  saveImport(@UploadedFile() file: { buffer: Buffer } | undefined, @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
+  saveImport(@UploadedFile() file: { buffer: Buffer } | undefined, @Query('date') date: string | undefined,
+    @Auth() actor: AuthContext, @Meta() meta: RequestMeta) {
     if (!file?.buffer.length) throw Errors.validation('اختر ملف Excel');
-    return this.importer.process(file.buffer, true, actor, meta);
+    return this.importer.process(file.buffer, true, actor, meta, date);
   }
 
   @Get()

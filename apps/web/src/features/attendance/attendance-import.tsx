@@ -14,7 +14,8 @@ type ImportRow = {
 };
 
 export function AttendanceImport({ timezone, onSaved }: { timezone: string; onSaved: () => void }) {
-  const [selection, setSelection] = useState<{ file: File; rows: ImportRow[]; saved: boolean }>();
+  const [selection, setSelection] = useState<{ file: File; date: string; rows: ImportRow[]; saved: boolean }>();
+  const [date, setDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -36,11 +37,12 @@ export function AttendanceImport({ timezone, onSaved }: { timezone: string; onSa
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
-  async function process(file: File, saved: boolean) {
+  async function process(file: File, workDate: string, saved: boolean) {
     const form = new FormData();
     form.append('file', file);
-    const { rows } = await api.post<{ rows: ImportRow[] }>(`/attendance/import/${saved ? 'save' : 'preview'}`, form);
-    setSelection({ file, rows, saved });
+    const { rows } = await api.post<{ rows: ImportRow[] }>(
+      `/attendance/import/${saved ? 'save' : 'preview'}?date=${encodeURIComponent(workDate)}`, form);
+    setSelection({ file, date: workDate, rows, saved });
     if (saved) onSaved();
   }
 
@@ -50,18 +52,24 @@ export function AttendanceImport({ timezone, onSaved }: { timezone: string; onSa
       <summary className="cursor-pointer font-semibold">استيراد دوام من Excel</summary>
       <div className="mt-3 space-y-3">
         <p className="text-sm text-muted">
-          اكتب كود الموظف من ورقة الموظفين النشطين. لكل وردية صف، ولكل وقت تاريخ كامل مثل <bdi>2026-11-14 15:00</bdi> حسب توقيت <bdi>{timezone}</bdi>.
-          الاستراحة اختيارية، وتُحسب غير مدفوعة إذا تركت خانة الدفع فارغة.
+          القالب فيه أرقام وأسماء الموظفين النشطين. عبّي الحضور والانصراف بنظام 24 ساعة حسب توقيت <bdi>{timezone}</bdi>.
+          الرقم <bdi>3</bdi> يعني <bdi>03:00</bdi> صباحًا، وللعصر اكتب <bdi>15:00</bdi>.
+          إذا كان الانصراف قبل الحضور بالساعة، يُعرض في المعاينة في اليوم التالي.
         </p>
         <Button variant="secondary" disabled={busy} onClick={() => void run(download)}>تنزيل قالب Excel</Button>
         <label className="block text-sm font-medium">
+          تاريخ الدوام
+          <input className="mt-1 block rounded border border-line bg-surface p-2" type="date" value={date} disabled={busy}
+            onChange={event => { setDate(event.currentTarget.value); setSelection(undefined); setError(''); }} />
+        </label>
+        <label className="block text-sm font-medium">
           رفع ملف للمعاينة
-          <input className="mt-1 block w-full" type="file" accept=".xlsx" disabled={busy} onChange={event => {
+          <input className="mt-1 block w-full" type="file" accept=".xlsx" disabled={busy || !date} onChange={event => {
             const file = event.currentTarget.files?.[0];
             event.currentTarget.value = '';
             if (!file) return;
             setSelection(undefined);
-            void run(() => process(file, false));
+            void run(() => process(file, date, false));
           }} />
         </label>
         {busy && <p role="status">جارٍ معالجة الملف…</p>}
@@ -74,7 +82,7 @@ export function AttendanceImport({ timezone, onSaved }: { timezone: string; onSa
               <div>{row.ok ? <bdi>{row.checkInAt?.replace('T', ' ')} ← {row.checkOutAt?.replace('T', ' ')}</bdi> : row.error}</div>
             </li>)}
           </ul>
-          {!selection.saved && <Button disabled={busy || !valid} onClick={() => void run(() => process(selection.file, true))}>
+          {!selection.saved && <Button disabled={busy || !valid} onClick={() => void run(() => process(selection.file, selection.date, true))}>
             حفظ الورديات السليمة كمسودات
           </Button>}
         </>}

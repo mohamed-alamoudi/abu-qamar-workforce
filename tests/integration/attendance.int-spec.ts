@@ -42,29 +42,36 @@ describe('الحضور والانصراف', () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(template as unknown as ExcelJS.Buffer);
     const sheet = workbook.getWorksheet('الدوام')!;
-    const shift = [employee.code, employee.fullName, '2026-03-01 22:00', '2026-03-02 01:00',
-      '2026-03-01 23:00', '2026-03-01 23:30', 'لا'];
-    sheet.addRows([shift, shift, ['EMP-UNKNOWN', '', shift[2], shift[3]]]);
+    expect(sheet.getRow(1).values).toEqual([, 'رقم الموظف', 'اسم الموظف', 'الحضور', 'الانصراف']);
+    expect(sheet.getCell('A2').value).toBe(employee.code);
+    expect(sheet.getCell('B2').value).toBe(employee.fullName);
+    const shift = [employee.code, employee.fullName, 22, '01:00'];
+    sheet.addRows([shift, shift, ['EMP-UNKNOWN', '', shift[2], shift[3]],
+      [employee.code, employee.fullName, '08:00', '10:00'], [employee.code, employee.fullName, '3 PM', '18:00']]);
     const file = Buffer.from(await workbook.xlsx.writeBuffer());
-    const upload = (client: Client, action: string) => client.send('post', '/attendance/import/' + action)
+    const upload = (client: Client, action: string, query = '?date=2026-03-01') => client.send('post', '/attendance/import/' + action + query)
       .attach('file', file, 'attendance.xlsx');
     const viewer = await createSupervisor(ctx, admin, ['attendance.view']);
     await viewer.client.get('/attendance/import/template').expect(403);
     await upload(viewer.client, 'save').expect(403);
     await admin.get('/attendance/import/template').expect(200);
+    await upload(admin, 'preview', '').expect(400);
+    await manual('2026-03-01T08:00', '2026-03-01T10:00').expect(201);
     const preview = await upload(admin, 'preview').expect(200);
-    expect(preview.body.rows.map((row: { ok: boolean }) => row.ok)).toEqual([true, false, false]);
-    expect(await ctx.prisma.workSession.count()).toBe(0);
+    expect(preview.body.rows.map((row: { ok: boolean }) => row.ok)).toEqual([true, false, false, false, false]);
+    expect(preview.body.rows[0].checkOutAt).toBe('2026-03-02T01:00');
+    expect(preview.body.rows[3].error).toContain('دوام مسجل');
+    expect(await ctx.prisma.workSession.count()).toBe(1);
     const saved = await upload(admin, 'save').expect(200);
-    expect(saved.body.rows.map((row: { ok: boolean }) => row.ok)).toEqual([true, false, false]);
+    expect(saved.body.rows.map((row: { ok: boolean }) => row.ok)).toEqual([true, false, false, false, false]);
     const replay = await upload(admin, 'save').expect(200);
     expect(replay.body.rows.every((row: { ok: boolean }) => !row.ok)).toBe(true);
-    const sessions = await ctx.prisma.workSession.findMany({ include: { breaks: true } });
-    expect(sessions).toHaveLength(1);
-    expect(sessions[0]).toMatchObject({ workedMinutes: 150, approvalStatus: 'DRAFT', breaks: [{ isPaid: false }] });
+    const sessions = await ctx.prisma.workSession.findMany({ orderBy: { checkInAt: 'asc' } });
+    expect(sessions).toHaveLength(2);
+    expect(sessions[1]).toMatchObject({ workedMinutes: 180, approvalStatus: 'DRAFT' });
     await admin.post('/attendance/bulk/review', {}).expect(201);
     await admin.post('/attendance/bulk/approve', {}).expect(201);
-    expect((await admin.get('/employees/' + employeeId + '/financial-balances').expect(200)).body.provisional).toBe('50');
+    expect((await admin.get('/employees/' + employeeId + '/financial-balances').expect(200)).body.provisional).toBe('100');
   });
 
   it('يرسل ويعتمد كل الورديات المؤهلة في النطاق عبر أكثر من صفحة', async () => {

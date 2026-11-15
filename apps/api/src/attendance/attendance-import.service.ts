@@ -4,12 +4,25 @@ import { inflateRawSync } from 'node:zlib';
 import { AppException, Errors } from '../common/errors/app-exception';
 import type { AuthContext, RequestMeta } from '../common/auth/auth.types';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { addDays, formatDateOnly, parseDateOnly } from '../common/utils/dates';
 import { AttendanceService, type ManualInput } from './attendance.service';
 
 export const ATTENDANCE_FILE_LIMIT = 512 * 1024;
 const ROW_LIMIT = 300;
 const SHEET = 'الدوام';
-const HEADERS = ['كود الموظف', 'اسم الموظف', 'الحضور', 'الانصراف', 'بداية الاستراحة', 'نهاية الاستراحة', 'استراحة مدفوعة'];
+const HEADERS = ['رقم الموظف', 'اسم الموظف', 'الحضور', 'الانصراف'];
+const LEGACY_HEADERS = ['كود الموظف', ...HEADERS.slice(1), 'بداية الاستراحة', 'نهاية الاستراحة', 'استراحة مدفوعة'];
+
+function clockTime(value: ExcelJS.CellValue, label: string): string {
+  const text = value instanceof Date && Number.isFinite(+value)
+    ? value.toISOString().slice(11, 19)
+    : typeof value === 'number' && value > 0 && value < 1
+      ? new Date(Math.round(value * 86400) * 1000).toISOString().slice(11, 19)
+      : typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+  const match = /^(\d{1,2})(?::([0-5]\d)(?::00)?)?$/.exec(text);
+  if (!match || Number(match[1]) > 23) throw Errors.validation(`أدخل وقت ${label} بنظام 24 ساعة، مثل 08:00 أو 15:30`);
+  return `${match[1].padStart(2, '0')}:${match[2] ?? '00'}`;
+}
 
 function timestamp(value: ExcelJS.CellValue, label: string): string {
   const text = value instanceof Date && Number.isFinite(+value)
@@ -74,15 +87,14 @@ export class AttendanceImportService {
     const sheet = workbook.addWorksheet(SHEET, { views: [{ rightToLeft: true, state: 'frozen', ySplit: 1 }] });
     sheet.columns = HEADERS.map((header, index) => ({ header, width: index === 1 ? 34 : 24, style: { numFmt: '@' } }));
     sheet.getRow(1).font = { bold: true };
-    const staff = workbook.addWorksheet('الموظفون النشطون', { views: [{ rightToLeft: true }] });
-    staff.columns = [{ header: HEADERS[0], key: 'code', width: 20 }, { header: HEADERS[1], key: 'fullName', width: 34 }];
-    staff.addRows(await this.db.employee.findMany({
+    const staff = await this.db.employee.findMany({
       where: { status: 'ACTIVE' }, select: { code: true, fullName: true }, orderBy: { fullName: 'asc' },
-    }));
+    });
+    sheet.addRows(staff.map(({ code, fullName }) => [code, fullName]));
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
-  async process(file: Buffer, save: boolean, actor: AuthContext, meta: RequestMeta) {
+  async process(file: Buffer, save: boolean, actor: AuthContext, meta: RequestMeta, date?: string) {
     assertArchiveSize(file);
     const workbook = new ExcelJS.Workbook();
     try {
@@ -91,16 +103,20 @@ export class AttendanceImportService {
       throw Errors.validation('تعذّر قراءة ملف Excel');
     }
     const sheet = workbook.getWorksheet(SHEET);
-    if (!sheet || HEADERS.some((header, index) => sheet.getCell(1, index + 1).value !== header)) {
+    const legacy = LEGACY_HEADERS.every((header, index) => sheet?.getCell(1, index + 1).value === header);
+    if (!sheet || (!legacy && HEADERS.some((header, index) => sheet.getCell(1, index + 1).value !== header))) {
       throw Errors.validation('استخدم قالب الدوام من الموقع وحافظ على أسماء الأعمدة');
     }
+    const day = typeof date === 'string' && parseDateOnly(date);
+    if ((!legacy || date !== undefined) && !day) throw Errors.validation('اختر تاريخ الدوام قبل رفع الملف');
+    const nextDay = day ? formatDateOnly(addDays(day, 1)) : '';
     if (sheet.rowCount > ROW_LIMIT + 1) throw Errors.validation(`الحد الأقصى ${ROW_LIMIT} وردية في الملف`);
     const rows = [];
     const accepted = new Map<string, { start: Date; end: Date }[]>();
     for (let number = 2; number <= sheet.rowCount; number++) {
       const row = sheet.getRow(number);
-      const [code, , start, end, breakStart, breakEnd, paid] = HEADERS.map((_, i) => row.getCell(i + 1).value);
-      if ([code, start, end, breakStart, breakEnd, paid].every(blank) && blank(row.getCell(2).value)) continue;
+      const [code, , start, end, breakStart, breakEnd, paid] = (legacy ? LEGACY_HEADERS : HEADERS).map((_, i) => row.getCell(i + 1).value);
+      if (blank(start) && blank(end) && (!legacy || [breakStart, breakEnd, paid].every(blank))) continue;
       let employeeName: string | undefined;
       try {
         if (typeof code !== 'string' || !code.trim()) throw Errors.validation('كود الموظف مطلوب');
@@ -109,10 +125,20 @@ export class AttendanceImportService {
         });
         if (!employee) throw Errors.validation('كود الموظف غير موجود');
         employeeName = employee.fullName;
-        const input: ManualInput = {
-          employeeId: employee.id, checkInAt: timestamp(start, 'الحضور'), checkOutAt: timestamp(end, 'الانصراف'),
-        };
-        if (![breakStart, breakEnd, paid].every(blank)) {
+        let checkInAt: string;
+        let checkOutAt: string;
+        if (legacy) {
+          checkInAt = timestamp(start, 'الحضور');
+          checkOutAt = timestamp(end, 'الانصراف');
+          if (day && !checkInAt.startsWith(`${date}T`)) throw Errors.validation('تاريخ الحضور في السطر يختلف عن اليوم المختار');
+        } else {
+          const arrival = clockTime(start, 'الحضور');
+          const departure = clockTime(end, 'الانصراف');
+          checkInAt = `${date}T${arrival}`;
+          checkOutAt = `${departure < arrival ? nextDay : date}T${departure}`;
+        }
+        const input: ManualInput = { employeeId: employee.id, checkInAt, checkOutAt };
+        if (legacy && ![breakStart, breakEnd, paid].every(blank)) {
           const flag = typeof paid === 'string' ? paid.trim() : '';
           if (!blank(paid) && flag !== 'نعم' && flag !== 'لا') throw Errors.validation('اكتب نعم أو لا للاستراحة المدفوعة');
           input.break = { startAt: timestamp(breakStart, 'بداية الاستراحة'), endAt: timestamp(breakEnd, 'نهاية الاستراحة'), isPaid: flag === 'نعم' };
@@ -129,7 +155,7 @@ export class AttendanceImportService {
           intervals.push({ start: shift.checkInAt, end: checkOutAt });
           accepted.set(employee.id, intervals);
         }
-        rows.push({ number, employeeName, checkInAt: input.checkInAt, checkOutAt: input.checkOutAt, ok: true });
+        rows.push({ number, employeeName, checkInAt, checkOutAt, ok: true });
       } catch (error) {
         if (!(error instanceof AppException)) throw error;
         rows.push({ number, employeeName, ok: false, error: error.message });
